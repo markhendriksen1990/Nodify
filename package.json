@@ -1,12 +1,18 @@
 {
-  "name": "nodify",
+  "name": "Nodify",
   "version": "1.0.0",
-  "main": "main.js",
+  "description": "Telegram bot for Uniswap LP tracking on Render",
+  "main": "main.js", // Or your main file name
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node main.js" // Or node your-main-file.js
+  },
+  "dependencies": {
+    "ethers": "^6.x.x",        // Make sure this matches your current ethers version
+    "express": "^4.x.x",       // For the web server
+    "body-parser": "^1.x.x",   // For parsing JSON requests from Telegram
+    "node-fetch": "^3.x.x"     // For making HTTP requests
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
-  "description": ""
+  "license": "ISC"
 }
