@@ -8,6 +8,7 @@ const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fet
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const CHAT_ID = process.env.CHAT_ID; // Your specific chat ID for sending messages
 const RENDER_WEBHOOK_URL = process.env.RENDER_WEBHOOK_URL; // Base URL of your Render service
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET; // The secret token for Telegram webhook verification
 
 // --- Ethers.js Provider and Contract Addresses (from your original code) ---
 const provider = new ethers.JsonRpcProvider("https://base.publicnode.com");
@@ -348,7 +349,12 @@ app.use(bodyParser.json());
 
 // Telegram Webhook endpoint
 app.post(`/bot${TELEGRAM_BOT_TOKEN}/webhook`, async (req, res) => {
-    // WEBHOOK_SECRET validation removed as requested
+    // Validate Telegram's webhook secret
+    const telegramSecret = req.get('X-Telegram-Bot-Api-Secret-Token');
+    if (!WEBHOOK_SECRET || telegramSecret !== WEBHOOK_SECRET) {
+        console.warn('Unauthorized webhook access attempt! Invalid or missing secret token.');
+        return res.status(403).send('Forbidden: Invalid secret token');
+    }
 
     const update = req.body;
     console.log('Received Telegram Update:', JSON.stringify(update, null, 2));
@@ -429,10 +435,11 @@ app.listen(PORT, () => {
     console.log(`Telegram webhook URL: ${RENDER_WEBHOOK_URL}/bot${TELEGRAM_BOT_TOKEN}/webhook`);
     // After deployment, you need to tell Telegram about your webhook URL
     // You can do this by making a GET request to:
-    // https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook?url=<RENDER_WEBHOOK_URL>/bot<TELEGRAM_BOT_TOKEN>/webhook
-    // Replace <TELEGRAM_BOT_TOKEN> and <RENDER_WEBHOOK_URL>
-    // Example: https://api.telegram.org/bot7572395356:AAHVpiXBZsq7Eoz5TzUDjDKui0beQAQyPE/setWebhook?url=https://uniswap-lp-tracker-telegram.onrender.com/bot7572395356:AAHVpiXBZsq7Eoz5TzUDjDKui0beQAQyPE/webhook
+    // https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook?url=<RENDER_WEBHOOK_URL>/bot<TELEGRAM_BOT_TOKEN>/webhook&secret_token=<YOUR_WEBHOOK_SECRET>
+    // Replace <TELEGRAM_BOT_TOKEN>, <RENDER_WEBHOOK_URL>, and <YOUR_WEBHOOK_SECRET> (with the secret you set in Render)
+    // Example: https://api.telegram.org/bot7572395356:AAHVpiXBZsq7Eoz5TzUDjDKui0beQAQyPE/setWebhook?url=https://nodify-8qih.onrender.com/bot7572395356:AAHVpiXBZsq7Eoz5TzUDjDKui0beQAQyPE/webhook&secret_token=your_new_super_secret_token_123abc
     // A convenient way to do this is to open that URL in your browser or use curl.
+    // Ensure the secret token matches the one set in your Render environment variables.
 });
 
 // Optional: Original main function for direct execution (e.g., via `node script.js`)
