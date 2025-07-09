@@ -41,15 +41,11 @@ const UINT128_MAX = "340282366920938463463374607431768211455";
 const { formatUnits } = ethers;
 
 // --- Utility Functions ---
-// CORRECTED: Added check for finite number before BigInt conversion
 function tickToSqrtPriceX96(tick) {
   const ratio = Math.pow(1.0001, Number(tick));
-  const product = Math.sqrt(ratio) * (2 ** 96); // Calculate product first
+  const product = Math.sqrt(ratio) * (2 ** 96);
 
   if (!Number.isFinite(product)) {
-    // If the product is Infinity, -Infinity, or NaN, return 0n as a safe fallback
-    // to prevent BigInt(Infinity/NaN) errors. This means the price is effectively
-    // at an extreme boundary, resulting in a near-zero or negligible amount of one token.
     return 0n; 
   }
   return BigInt(Math.floor(product));
@@ -185,10 +181,10 @@ async function getFormattedPositionData(walletAddress) {
 
     const prices = await getUsdPrices();
 
-    let totalFeeUSD = 0;
-    let startPrincipalUSD = null;
-    let startDate = null;
-    let lastPortfolioValue = 0;
+    let totalPortfolioFeesUSD = 0; // Renamed to clearly separate from per-position fees
+    let oldestPositionStartDate = null;
+    let oldestPositionInitialPrincipalUSD = null;
+    let currentTotalPortfolioValue = 0; // Accumulates total value of all positions including fees
 
     for (let i = 0n; i < balance; i++) {
       responseMessage += `\n--- *Position #${i.toString()}* ---\n`;
@@ -201,48 +197,54 @@ async function getFormattedPositionData(walletAddress) {
       ]);
       responseMessage += `🔸 Pool: ${t0.symbol}/${t1.symbol}\n`;
 
-      // Get mint event and analyze initial investment
+      let currentPositionStartDate = null;
+      let currentPositionInitialPrincipalUSD = null;
+      let positionHistoryAnalysisSucceeded = false;
+
+      // Get mint event and analyze initial investment for THIS position
       try {
         const mintBlock = await getMintEventBlock(manager, tokenId, provider, walletAddress);
         const startTimestampMs = await getBlockTimestamp(mintBlock);
-        const currentPositionStartDate = new Date(startTimestampMs);
+        currentPositionStartDate = new Date(startTimestampMs);
         
-        // Only set overall startDate and startPrincipalUSD from the oldest position if not set yet, or update if this is older
-        if (!startDate || currentPositionStartDate.getTime() < startDate.getTime()) {
-            startDate = currentPositionStartDate;
-            const day = startDate.getDate().toString().padStart(2, '0');
-            const month = (startDate.getMonth() + 1).toString().padStart(2, '0');
-            const year = startDate.getFullYear();
-            const dateStr = `${day}-${month}-${year}`;
-            const histWETH = await fetchHistoricalPrice('ethereum', dateStr);
-            const histUSDC = await fetchHistoricalPrice('usd-coin', dateStr);
-
-            // Using tickLower and tickUpper for historical amount approximation
-            const [histAmt0, histAmt1] = getAmountsFromLiquidity(
-              pos.liquidity,
-              // For historical price at mint, we'd typically need the sqrtPriceX96 at that exact block.
-              // Approximating with tickLower for starting amount calculation.
-              // Note: This is a simplification; a true historical price requires more complex data.
-              tickToSqrtPriceX96(Number(pos.tickLower)),
-              tickToSqrtPriceX96(Number(pos.tickLower)), // Using tickLower for both current_sqrt_price, lower_sqrt_price
-              tickToSqrtPriceX96(Number(pos.tickUpper)) 
-            );
-
-            let histWETHamt = 0, histUSDCamt = 0;
-            if (t0.symbol.toUpperCase() === "WETH") {
-              histWETHamt = parseFloat(formatUnits(histAmt0, t0.decimals));
-              histUSDCamt = parseFloat(formatUnits(histAmt1, t1.decimals));
-            } else {
-              histWETHamt = parseFloat(formatUnits(histAmt1, t1.decimals));
-              histUSDCamt = parseFloat(formatUnits(histAmt0, t0.decimals));
-            }
-            startPrincipalUSD = histWETHamt * histWETH + histUSDCamt * histUSDC;
+        // Update oldestPositionStartDate and oldestPositionInitialPrincipalUSD for OVERALL summary
+        if (!oldestPositionStartDate || currentPositionStartDate.getTime() < oldestPositionStartDate.getTime()) {
+            oldestPositionStartDate = currentPositionStartDate;
         }
+
+        const day = currentPositionStartDate.getDate().toString().padStart(2, '0');
+        const month = (currentPositionStartDate.getMonth() + 1).toString().padStart(2, '0');
+        const year = currentPositionStartDate.getFullYear();
+        const dateStr = `${day}-${month}-${year}`;
+        const histWETH = await fetchHistoricalPrice('ethereum', dateStr);
+        const histUSDC = await fetchHistoricalPrice('usd-coin', dateStr);
+
+        const [histAmt0, histAmt1] = getAmountsFromLiquidity(
+          pos.liquidity,
+          tickToSqrtPriceX96(Number(pos.tickLower)),
+          tickToSqrtPriceX96(Number(pos.tickLower)), // Using tickLower for current_sqrt_price as an approximation
+          tickToSqrtPriceX96(Number(pos.tickUpper)) 
+        );
+
+        let histWETHamt = 0, histUSDCamt = 0;
+        if (t0.symbol.toUpperCase() === "WETH") {
+          histWETHamt = parseFloat(formatUnits(histAmt0, t0.decimals));
+          histUSDCamt = parseFloat(formatUnits(histAmt1, t1.decimals));
+        } else {
+          histWETHamt = parseFloat(formatUnits(histAmt1, t1.decimals));
+          histUSDCamt = parseFloat(formatUnits(histAmt0, t0.decimals));
+        }
+        currentPositionInitialPrincipalUSD = histWETHamt * histWETH + histUSDCamt * histUSDC;
+        positionHistoryAnalysisSucceeded = true;
+
+        if (oldestPositionInitialPrincipalUSD === null || currentPositionStartDate.getTime() === oldestPositionStartDate.getTime()) {
+             // If this is the oldest position, or it's the first one processed, set the overall initial principal
+            oldestPositionInitialPrincipalUSD = currentPositionInitialPrincipalUSD;
+        }
+
 
         responseMessage += `📅 Created: ${currentPositionStartDate.toISOString().replace('T', ' ').slice(0, 19)}\n`;
-        if (startPrincipalUSD !== null) {
-            responseMessage += `💰 Initial Est. Investment: $${startPrincipalUSD.toFixed(2)}\n`;
-        }
+        responseMessage += `💰 Initial Est. Investment: $${currentPositionInitialPrincipalUSD.toFixed(2)}\n`;
       } catch (error) {
         responseMessage += `⚠️ Could not analyze position history: ${error.message}\n`;
       }
@@ -253,9 +255,7 @@ async function getFormattedPositionData(walletAddress) {
       const currentPrice = tickToPricePerToken0(Number(nativeTick), Number(t0.decimals), Number(t1.decimals));
 
       responseMessage += `\n📊 *Price Information*\n`;
-      responseMessage += `🏷️ Tick Range: \`[${pos.tickLower}, ${pos.tickUpper}]\`\n`;
       responseMessage += `🏷️ Price Range: $${lowerPrice.toFixed(4)} - $${upperPrice.toFixed(4)} ${t1.symbol}/${t0.symbol}\n`;
-      responseMessage += `🌐 Current Tick: \`${nativeTick}\`\n`;
       responseMessage += `🌐 Current Price: $${currentPrice.toFixed(4)} ${t1.symbol}/${t0.symbol}\n`;
       
       const inRange = nativeTick >= pos.tickLower && nativeTick < pos.tickUpper;
@@ -300,50 +300,71 @@ async function getFormattedPositionData(walletAddress) {
       const fee1 = parseFloat(formatUnits(xp[1], t1.decimals));
       const feeUSD0 = fee0 * (t0.symbol.toUpperCase() === "WETH" ? prices.WETH : prices.USDC);
       const feeUSD1 = fee1 * (t1.symbol.toUpperCase() === "WETH" ? prices.WETH : prices.USDC);
+      const totalPositionFeesUSD = feeUSD0 + feeUSD1; // Fees for this specific position
 
       responseMessage += `\n💰 *Uncollected Fees*\n`;
       responseMessage += `💰 ${formatTokenAmount(fee0, 6)} ${t0.symbol} ($${feeUSD0.toFixed(2)})\n`;
       responseMessage += `💰 ${formatTokenAmount(fee1, 2)} ${t1.symbol} ($${feeUSD1.toFixed(2)})\n`;
-      responseMessage += `💰 Total Fees: *$${(feeUSD0 + feeUSD1).toFixed(2)}*\n`;
+      responseMessage += `💰 Total Fees: *$${totalPositionFeesUSD.toFixed(2)}*\n`;
 
-      const currentTotalValue = principalUSD + feeUSD0 + feeUSD1;
+      // NEW: Per-Position Fee Performance
+      if (positionHistoryAnalysisSucceeded && currentPositionInitialPrincipalUSD !== null && currentPositionInitialPrincipalUSD > 0) {
+          const now = new Date();
+          const elapsedMs = now.getTime() - currentPositionStartDate.getTime();
+          const rewardsPerHour = elapsedMs > 0 ? totalPositionFeesUSD / (elapsedMs / 1000 / 60 / 60) : 0;
+          const rewardsPerDay = rewardsPerHour * 24;
+          const rewardsPerMonth = rewardsPerDay * 30.44;
+          const rewardsPerYear = rewardsPerDay * 365.25;
+          const feesAPR = (rewardsPerYear / currentPositionInitialPrincipalUSD) * 100;
+
+          responseMessage += `\n📊 *Fee Performance (This Position)*\n`;
+          responseMessage += `💎 Fees per hour: $${rewardsPerHour.toFixed(2)}\n`;
+          responseMessage += `💎 Fees per day: $${rewardsPerDay.toFixed(2)}\n`;
+          responseMessage += `💎 Fees per month: $${rewardsPerMonth.toFixed(2)}\n`;
+          responseMessage += `💎 Fees per year: $${rewardsPerYear.toFixed(2)}\n`;
+          responseMessage += `💎 Fees APR: ${feesAPR.toFixed(2)}%\n`;
+      } else {
+          responseMessage += `\n⚠️ Could not determine per-position fee performance (initial investment unknown or zero).\n`;
+      }
+
+      const currentTotalValue = principalUSD + totalPositionFeesUSD;
       responseMessage += `\n🏦 *Total Position Value (incl. fees): $${currentTotalValue.toFixed(2)}*\n`;
 
-      totalFeeUSD += (feeUSD0 + feeUSD1);
-      lastPortfolioValue = currentTotalValue;
+      totalPortfolioFeesUSD += totalPositionFeesUSD; // Accumulate for overall summary
+      currentTotalPortfolioValue += currentTotalValue; // Accumulate for overall summary
     }
 
-    // --- Overall Performance Analysis Section ---
-    if (startDate && startPrincipalUSD !== null) {
+    // --- Overall Portfolio Performance Analysis Section ---
+    if (oldestPositionStartDate && oldestPositionInitialPrincipalUSD !== null && oldestPositionInitialPrincipalUSD > 0) {
         const now = new Date();
-        const elapsedMs = now.getTime() - startDate.getTime();
-        const rewardsPerHour = elapsedMs > 0 ? totalFeeUSD / (elapsedMs / 1000 / 60 / 60) : 0;
-        const rewardsPerDay = rewardsPerHour * 24;
-        const rewardsPerMonth = rewardsPerDay * 30.44;
-        const rewardsPerYear = rewardsPerDay * 365.25;
-        const totalReturn = lastPortfolioValue - startPrincipalUSD;
-        const totalReturnPercent = (totalReturn / startPrincipalUSD) * 100;
-        const feesAPR = (rewardsPerYear / startPrincipalUSD) * 100;
+        const elapsedMs = now.getTime() - oldestPositionStartDate.getTime();
+        const rewardsPerHourOverall = elapsedMs > 0 ? totalPortfolioFeesUSD / (elapsedMs / 1000 / 60 / 60) : 0;
+        const rewardsPerDayOverall = rewardsPerHourOverall * 24;
+        const rewardsPerMonthOverall = rewardsPerDayOverall * 30.44;
+        const rewardsPerYearOverall = rewardsPerDayOverall * 365.25;
+        const totalReturnOverall = currentTotalPortfolioValue - oldestPositionInitialPrincipalUSD; // Use overall current value
+        const totalReturnPercentOverall = (totalReturnOverall / oldestPositionInitialPrincipalUSD) * 100;
+        const feesAPROverall = (rewardsPerYearOverall / oldestPositionInitialPrincipalUSD) * 100;
 
         responseMessage += `\n=== *OVERALL PORTFOLIO PERFORMANCE* ===\n`;
-        responseMessage += `📅 Oldest Position: ${startDate.toISOString().replace('T', ' ').slice(0, 19)}\n`;
+        responseMessage += `📅 Oldest Position Created: ${oldestPositionStartDate.toISOString().replace('T', ' ').slice(0, 19)}\n`;
         responseMessage += `📅 Analysis Period: ${formatElapsedDaysHours(elapsedMs)}\n`;
-        responseMessage += `💰 Initial Investment: $${startPrincipalUSD.toFixed(2)}\n`;
-        responseMessage += `💰 Current Value: $${lastPortfolioValue.toFixed(2)}\n`;
-        responseMessage += `💰 Total Return: $${totalReturn.toFixed(2)} (${totalReturnPercent.toFixed(2)}%)\n`;
+        responseMessage += `💰 Initial Total Investment: $${oldestPositionInitialPrincipalUSD.toFixed(2)}\n`;
+        responseMessage += `💰 Current Total Portfolio Value: $${currentTotalPortfolioValue.toFixed(2)}\n`;
+        responseMessage += `💰 Total Return: $${totalReturnOverall.toFixed(2)} (${totalReturnPercentOverall.toFixed(2)}%)\n`;
         
-        responseMessage += `\n📊 *Fee Performance*\n`;
-        responseMessage += `💎 Total Fees Earned: $${totalFeeUSD.toFixed(2)}\n`;
-        responseMessage += `💎 Fees per hour: $${rewardsPerHour.toFixed(2)}\n`;
-        responseMessage += `💎 Fees per day: $${rewardsPerDay.toFixed(2)}\n`;
-        responseMessage += `💎 Fees per month: $${rewardsPerMonth.toFixed(2)}\n`;
-        responseMessage += `💎 Fees per year: $${rewardsPerYear.toFixed(2)}\n`;
-        responseMessage += `💎 Fees APR: ${feesAPR.toFixed(2)}%\n`;
+        responseMessage += `\n📊 *Total Fees Earned (Portfolio)*\n`;
+        responseMessage += `💎 Total Fees Earned: $${totalPortfolioFeesUSD.toFixed(2)}\n`;
+        responseMessage += `💎 Fees per hour: $${rewardsPerHourOverall.toFixed(2)}\n`;
+        responseMessage += `💎 Fees per day: $${rewardsPerDayOverall.toFixed(2)}\n`;
+        responseMessage += `💎 Fees per month: $${rewardsPerMonthOverall.toFixed(2)}\n`;
+        responseMessage += `💎 Fees per year: $${rewardsPerYearOverall.toFixed(2)}\n`;
+        responseMessage += `💎 Fees APR: ${feesAPROverall.toFixed(2)}%\n`;
 
-        responseMessage += `\n🎯 *Overall Performance*\n`;
-        responseMessage += `📈 Total APR (incl. price changes): ${((totalReturn / startPrincipalUSD) * (365.25 / (elapsedMs / (1000 * 60 * 60 * 24))) * 100).toFixed(2)}%\n`;
+        responseMessage += `\n🎯 *Overall Portfolio Performance (Total APR)*\n`;
+        responseMessage += `📈 Total APR (incl. price changes): ${((totalReturnOverall / oldestPositionInitialPrincipalUSD) * (365.25 / (elapsedMs / (1000 * 60 * 60 * 24))) * 100).toFixed(2)}%\n`;
     } else {
-        responseMessage += '\n❌ Could not determine start date or start principal USD value for overall performance analysis.\n';
+        responseMessage += '\n❌ Could not determine overall portfolio performance (initial investment unknown or zero for oldest position).\n';
     }
 
   } catch (error) {
