@@ -2,22 +2,22 @@
 const { ethers } = require("ethers");
 const express = require('express');
 const bodyParser = require('body-parser');
-const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args)); // Ensure node-fetch is compatible with CommonJS if you're using require
+const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
 // --- Configuration from Environment Variables ---
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const CHAT_ID = process.env.CHAT_ID; // Your specific chat ID for sending messages
-const RENDER_WEBHOOK_URL = process.env.RENDER_WEBHOOK_URL; // Base URL of your Render service
-const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET; // The secret token for Telegram webhook verification
+const CHAT_ID = process.env.CHAT_ID;
+const RENDER_WEBHOOK_URL = process.env.RENDER_WEBHOOK_URL;
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 
-// --- Ethers.js Provider and Contract Addresses (from your original code) ---
+// --- Ethers.js Provider and Contract Addresses ---
 const provider = new ethers.JsonRpcProvider("https://base.publicnode.com");
 
 const managerAddress = "0x03a520b32c04bf3beef7beb72e919cf822ed34f1";
 const poolAddress = "0xd0b53D9277642d899DF5C87A3966A349A798F224";
-const myAddress = "0x2FD24cC510b7a40b176B05A5Bb628d024e3B6886"; // The wallet address to track
+const myAddress = "0x2FD24cC510b7a40b176B05A5Bb628d024e3B6886";
 
-// --- ABIs (from your original code) ---
+// --- ABIs ---
 const managerAbi = [
   "function balanceOf(address owner) view returns (uint256)",
   "function tokenOfOwnerByIndex(address owner, uint256 index) view returns (uint256)",
@@ -40,10 +40,19 @@ const erc20Abi = [
 const UINT128_MAX = "340282366920938463463374607431768211455";
 const { formatUnits } = ethers;
 
-// --- Utility Functions (from your original code - unmodified) ---
+// --- Utility Functions ---
+// CORRECTED: Added check for finite number before BigInt conversion
 function tickToSqrtPriceX96(tick) {
   const ratio = Math.pow(1.0001, Number(tick));
-  return BigInt(Math.floor(Math.sqrt(ratio) * 2 ** 96));
+  const product = Math.sqrt(ratio) * (2 ** 96); // Calculate product first
+
+  if (!Number.isFinite(product)) {
+    // If the product is Infinity, -Infinity, or NaN, return 0n as a safe fallback
+    // to prevent BigInt(Infinity/NaN) errors. This means the price is effectively
+    // at an extreme boundary, resulting in a near-zero or negligible amount of one token.
+    return 0n; 
+  }
+  return BigInt(Math.floor(product));
 }
 
 function getAmountsFromLiquidity(liquidity, sqrtPriceX96, sqrtLowerX96, sqrtUpperX96) {
@@ -110,7 +119,7 @@ function formatElapsedDaysHours(ms) {
   return `${days} days, ${hours} hours`;
 }
 
-// --- Helper to efficiently find mint event for tokenId (unmodified) ---
+// --- Helper to efficiently find mint event for tokenId ---
 async function getMintEventBlock(manager, tokenId, provider, ownerAddress) {
   const latestBlock = await provider.getBlockNumber();
   const zeroAddress = "0x0000000000000000000000000000000000000000";
@@ -140,14 +149,13 @@ async function getBlockTimestamp(blockNumber) {
 }
 
 async function fetchHistoricalPrice(coinId, dateStr) {
-  // dateStr: '01-07-2025' for CoinGecko
   const url = `https://api.coingecko.com/api/v3/coins/${coinId}/history?date=${dateStr}`;
   const res = await fetch(url);
   const data = await res.json();
   return data.market_data?.current_price?.usd || 0;
 }
 
-// --- Refactored LP Position Data Fetcher (adapted from your original main) ---
+// --- Refactored LP Position Data Fetcher ---
 async function getFormattedPositionData(walletAddress) {
   let responseMessage = "";
   try {
@@ -180,7 +188,7 @@ async function getFormattedPositionData(walletAddress) {
     let totalFeeUSD = 0;
     let startPrincipalUSD = null;
     let startDate = null;
-    let lastPortfolioValue = 0; // Only capture for the last position for overall summary
+    let lastPortfolioValue = 0;
 
     for (let i = 0n; i < balance; i++) {
       responseMessage += `\n--- *Position #${i.toString()}* ---\n`;
@@ -197,7 +205,7 @@ async function getFormattedPositionData(walletAddress) {
       try {
         const mintBlock = await getMintEventBlock(manager, tokenId, provider, walletAddress);
         const startTimestampMs = await getBlockTimestamp(mintBlock);
-        const currentPositionStartDate = new Date(startTimestampMs); // Use a distinct variable
+        const currentPositionStartDate = new Date(startTimestampMs);
         
         // Only set overall startDate and startPrincipalUSD from the oldest position if not set yet, or update if this is older
         if (!startDate || currentPositionStartDate.getTime() < startDate.getTime()) {
@@ -209,10 +217,15 @@ async function getFormattedPositionData(walletAddress) {
             const histWETH = await fetchHistoricalPrice('ethereum', dateStr);
             const histUSDC = await fetchHistoricalPrice('usd-coin', dateStr);
 
+            // Using tickLower and tickUpper for historical amount approximation
             const [histAmt0, histAmt1] = getAmountsFromLiquidity(
               pos.liquidity,
+              // For historical price at mint, we'd typically need the sqrtPriceX96 at that exact block.
+              // Approximating with tickLower for starting amount calculation.
+              // Note: This is a simplification; a true historical price requires more complex data.
               tickToSqrtPriceX96(Number(pos.tickLower)),
-              tickToSqrtPriceX96(Number(pos.tickUpper)) // Corrected from original where tickUpper was not used
+              tickToSqrtPriceX96(Number(pos.tickLower)), // Using tickLower for both current_sqrt_price, lower_sqrt_price
+              tickToSqrtPriceX96(Number(pos.tickUpper)) 
             );
 
             let histWETHamt = 0, histUSDCamt = 0;
@@ -297,13 +310,13 @@ async function getFormattedPositionData(walletAddress) {
       responseMessage += `\n🏦 *Total Position Value (incl. fees): $${currentTotalValue.toFixed(2)}*\n`;
 
       totalFeeUSD += (feeUSD0 + feeUSD1);
-      lastPortfolioValue = currentTotalValue; // Update with the latest position's total value
+      lastPortfolioValue = currentTotalValue;
     }
 
     // --- Overall Performance Analysis Section ---
     if (startDate && startPrincipalUSD !== null) {
         const now = new Date();
-        const elapsedMs = now.getTime() - startDate.getTime(); // Ensure proper time difference calculation
+        const elapsedMs = now.getTime() - startDate.getTime();
         const rewardsPerHour = elapsedMs > 0 ? totalFeeUSD / (elapsedMs / 1000 / 60 / 60) : 0;
         const rewardsPerDay = rewardsPerHour * 24;
         const rewardsPerMonth = rewardsPerDay * 30.44;
@@ -342,7 +355,7 @@ async function getFormattedPositionData(walletAddress) {
 
 // --- Express App Setup for Webhook ---
 const app = express();
-const PORT = process.env.PORT || 3000; // Render sets PORT env var
+const PORT = process.env.PORT || 3000;
 
 // Use body-parser to parse JSON payloads from Telegram
 app.use(bodyParser.json());
@@ -362,7 +375,7 @@ app.post(`/bot${TELEGRAM_BOT_TOKEN}/webhook`, async (req, res) => {
     // We expect 'message' updates
     if (update.message) {
         const messageText = update.message.text;
-        const chatId = update.message.chat.id; // Use the chat ID from the incoming message
+        const chatId = update.message.chat.id;
 
         // Respond to /positions command or menu button
         if (messageText && messageText.startsWith('/positions')) {
@@ -398,8 +411,8 @@ async function sendMessage(chatId, text) {
             body: JSON.stringify({
                 chat_id: chatId,
                 text: text,
-                parse_mode: 'Markdown', // Use Markdown for formatting
-                disable_web_page_preview: true // Prevent Telegram from generating link previews
+                parse_mode: 'Markdown',
+                disable_web_page_preview: true
             })
         });
         const data = await response.json();
@@ -433,24 +446,4 @@ async function sendChatAction(chatId, action) {
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
     console.log(`Telegram webhook URL: ${RENDER_WEBHOOK_URL}/bot${TELEGRAM_BOT_TOKEN}/webhook`);
-    // After deployment, you need to tell Telegram about your webhook URL
-    // You can do this by making a GET request to:
-    // https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook?url=<RENDER_WEBHOOK_URL>/bot<TELEGRAM_BOT_TOKEN>/webhook&secret_token=<YOUR_WEBHOOK_SECRET>
-    // Replace <TELEGRAM_BOT_TOKEN>, <RENDER_WEBHOOK_URL>, and <YOUR_WEBHOOK_SECRET> (with the secret you set in Render)
-    // Example: https://api.telegram.org/bot7572395356:AAHVpiXBZsq7Eoz5TzUDjDKui0beQAQyPE/setWebhook?url=https://nodify-8qih.onrender.com/bot7572395356:AAHVpiXBZsq7Eoz5TzUDjDKui0beQAQyPE/webhook&secret_token=your_new_super_secret_token_123abc
-    // A convenient way to do this is to open that URL in your browser or use curl.
-    // Ensure the secret token matches the one set in your Render environment variables.
 });
-
-// Optional: Original main function for direct execution (e.g., via `node script.js`)
-// If you run this directly, it will output to console and exit.
-// When deployed as a webhook, the server keeps running and responds to Telegram events.
-async function runDirectAnalysis() {
-    console.log("Running direct analysis...");
-    const data = await getFormattedPositionData(myAddress);
-    console.log(data);
-    console.log("Direct analysis complete.");
-}
-
-// To run direct analysis uncomment the line below:
-// runDirectAnalysis().catch(console.error);
