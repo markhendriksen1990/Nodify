@@ -8,8 +8,6 @@ const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fet
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const CHAT_ID = process.env.CHAT_ID; // Your specific chat ID for sending messages
 const RENDER_WEBHOOK_URL = process.env.RENDER_WEBHOOK_URL; // Base URL of your Render service
-const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || 'your_render_secret_here'; // Telegram webhook secret for verification
-                                                                              // IMPORTANT: Generate a strong, random secret for production!
 
 // --- Ethers.js Provider and Contract Addresses (from your original code) ---
 const provider = new ethers.JsonRpcProvider("https://base.publicnode.com");
@@ -213,7 +211,7 @@ async function getFormattedPositionData(walletAddress) {
             const [histAmt0, histAmt1] = getAmountsFromLiquidity(
               pos.liquidity,
               tickToSqrtPriceX96(Number(pos.tickLower)),
-              tickToSqrtPriceX99(Number(pos.tickUpper)) // Corrected from original where tickUpper was not used
+              tickToSqrtPriceX96(Number(pos.tickUpper)) // Corrected from original where tickUpper was not used
             );
 
             let histWETHamt = 0, histUSDCamt = 0;
@@ -245,7 +243,7 @@ async function getFormattedPositionData(walletAddress) {
       responseMessage += `🏷️ Price Range: $${lowerPrice.toFixed(4)} - $${upperPrice.toFixed(4)} ${t1.symbol}/${t0.symbol}\n`;
       responseMessage += `🌐 Current Tick: \`${nativeTick}\`\n`;
       responseMessage += `🌐 Current Price: $${currentPrice.toFixed(4)} ${t1.symbol}/${t0.symbol}\n`;
-
+      
       const inRange = nativeTick >= pos.tickLower && nativeTick < pos.tickUpper;
       responseMessage += `📍 In Range? ${inRange ? "✅ Yes" : "❌ No"}\n`;
 
@@ -350,12 +348,7 @@ app.use(bodyParser.json());
 
 // Telegram Webhook endpoint
 app.post(`/bot${TELEGRAM_BOT_TOKEN}/webhook`, async (req, res) => {
-    // Optional: Validate Telegram's webhook secret
-    const telegramSecret = req.get('X-Telegram-Bot-Api-Secret-Token');
-    if (WEBHOOK_SECRET && telegramSecret !== WEBHOOK_SECRET) {
-        console.warn('Unauthorized webhook access attempt!');
-        return res.status(403).send('Forbidden: Invalid secret token');
-    }
+    // WEBHOOK_SECRET validation removed as requested
 
     const update = req.body;
     console.log('Received Telegram Update:', JSON.stringify(update, null, 2));
@@ -436,11 +429,10 @@ app.listen(PORT, () => {
     console.log(`Telegram webhook URL: ${RENDER_WEBHOOK_URL}/bot${TELEGRAM_BOT_TOKEN}/webhook`);
     // After deployment, you need to tell Telegram about your webhook URL
     // You can do this by making a GET request to:
-    // https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook?url=<RENDER_WEBHOOK_URL>/bot<TELEGRAM_BOT_TOKEN>/webhook&secret_token=<YOUR_WEBHOOK_SECRET>
-    // Replace <TELEGRAM_BOT_TOKEN>, <RENDER_WEBHOOK_URL>, and <YOUR_WEBHOOK_SECRET>
-    // Example: https://api.telegram.org/bot7572395356:AAHVpiXBZsq7Eoz5TzUDjDKui0beQAQyPE/setWebhook?url=https://uniswap-lp-tracker-telegram.onrender.com/bot7572395356:AAHVpiXBZsq7Eoz5TzUDjDKui0beQAQyPE/webhook&secret_token=your_render_secret_here
+    // https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook?url=<RENDER_WEBHOOK_URL>/bot<TELEGRAM_BOT_TOKEN>/webhook
+    // Replace <TELEGRAM_BOT_TOKEN> and <RENDER_WEBHOOK_URL>
+    // Example: https://api.telegram.org/bot7572395356:AAHVpiXBZsq7Eoz5TzUDjDKui0beQAQyPE/setWebhook?url=https://uniswap-lp-tracker-telegram.onrender.com/bot7572395356:AAHVpiXBZsq7Eoz5TzUDjDKui0beQAQyPE/webhook
     // A convenient way to do this is to open that URL in your browser or use curl.
-    // Ensure the secret token matches the one set in your Render environment variables.
 });
 
 // Optional: Original main function for direct execution (e.g., via `node script.js`)
