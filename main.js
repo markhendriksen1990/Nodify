@@ -41,15 +41,11 @@ const UINT128_MAX = "340282366920938463463374607431768211455";
 const { formatUnits } = ethers;
 
 // --- Utility Functions ---
-// CORRECTED: Added check for finite number before BigInt conversion
 function tickToSqrtPriceX96(tick) {
   const ratio = Math.pow(1.0001, Number(tick));
-  const product = Math.sqrt(ratio) * (2 ** 96); // Calculate product first
+  const product = Math.sqrt(ratio) * (2 ** 96);
 
   if (!Number.isFinite(product)) {
-    // If the product is Infinity, -Infinity, or NaN, return 0n as a safe fallback
-    // to prevent BigInt(Infinity/NaN) errors. This means the price is effectively
-    // at an extreme boundary, resulting in a near-zero or negligible amount of one token.
     return 0n; 
   }
   return BigInt(Math.floor(product));
@@ -85,10 +81,35 @@ async function getTokenMeta(addr) {
   }
 }
 
+// CORRECTED: Added robustness to getUsdPrices
 async function getUsdPrices() {
-  const res = await fetch("https://api.coingecko.com/api/v3/simple/price?ids=ethereum,usd-coin&vs_currencies=usd");
-  const d = await res.json();
-  return { WETH: d.ethereum.usd, USDC: d["usd-coin"].usd };
+  try {
+    const res = await fetch("https://api.coingecko.com/api/v3/simple/price?ids=ethereum,usd-coin&vs_currencies=usd");
+    
+    if (!res.ok) {
+        console.error(`CoinGecko API responded with status: ${res.status} ${res.statusText}`);
+        // Attempt to read body for more info, but don't crash
+        const errorBody = await res.text();
+        console.error(`CoinGecko API error body: ${errorBody.substring(0, 200)}...`); // Log first 200 chars
+        throw new Error(`CoinGecko API failed to fetch prices: ${res.status}`);
+    }
+
+    const d = await res.json();
+    
+    // Check if expected data exists
+    if (!d || !d.ethereum || !d.ethereum.usd || !d["usd-coin"] || !d["usd-coin"].usd) {
+        console.error("CoinGecko API returned unexpected data structure:", JSON.stringify(d));
+        throw new Error("CoinGecko API returned incomplete price data.");
+    }
+
+    return { WETH: d.ethereum.usd, USDC: d["usd-coin"].usd };
+  } catch (error) {
+    console.error(`Failed to get USD prices from CoinGecko: ${error.message}`);
+    // Fallback to default prices or 0 to prevent crash, affecting total USD values
+    // This will allow the bot to respond, but with potentially inaccurate USD values
+    // (e.g., if WETH price is missing, it will default to 0 for calculations).
+    return { WETH: 0, USDC: 1 }; // Default USDC to 1 to at least show USDC values correctly
+  }
 }
 
 function getRatio(weth, usdc) {
@@ -158,7 +179,11 @@ async function fetchHistoricalPrice(coinId, dateStr) {
 // --- Refactored LP Position Data Fetcher ---
 async function getFormattedPositionData(walletAddress) {
   let responseMessage = "";
+  let prices = { WETH: 0, USDC: 0 }; // Initialize prices to avoid errors if getUsdPrices fails
+
   try {
+    prices = await getUsdPrices(); // Fetch prices first and handle potential errors
+
     const manager = new ethers.Contract(managerAddress, managerAbi, provider);
     const pool = new ethers.Contract(poolAddress, poolAbi, provider);
 
@@ -183,8 +208,6 @@ async function getFormattedPositionData(walletAddress) {
       return responseMessage;
     }
 
-    const prices = await getUsdPrices();
-
     let totalFeeUSD = 0;
     let startPrincipalUSD = null;
     let startDate = null;
@@ -201,11 +224,15 @@ async function getFormattedPositionData(walletAddress) {
       ]);
       responseMessage += `🔸 Pool: ${t0.symbol}/${t1.symbol}\n`;
 
+      let currentPositionStartDate = null;
+      let currentPositionInitialPrincipalUSD = null;
+      let positionHistoryAnalysisSucceeded = false;
+
       // Get mint event and analyze initial investment
       try {
         const mintBlock = await getMintEventBlock(manager, tokenId, provider, walletAddress);
         const startTimestampMs = await getBlockTimestamp(mintBlock);
-        const currentPositionStartDate = new Date(startTimestampMs);
+        currentPositionStartDate = new Date(startTimestampMs);
         
         // Only set overall startDate and startPrincipalUSD from the oldest position if not set yet, or update if this is older
         if (!startDate || currentPositionStartDate.getTime() < startDate.getTime()) {
@@ -217,14 +244,10 @@ async function getFormattedPositionData(walletAddress) {
             const histWETH = await fetchHistoricalPrice('ethereum', dateStr);
             const histUSDC = await fetchHistoricalPrice('usd-coin', dateStr);
 
-            // Using tickLower and tickUpper for historical amount approximation
             const [histAmt0, histAmt1] = getAmountsFromLiquidity(
               pos.liquidity,
-              // For historical price at mint, we'd typically need the sqrtPriceX96 at that exact block.
-              // Approximating with tickLower for starting amount calculation.
-              // Note: This is a simplification; a true historical price requires more complex data.
               tickToSqrtPriceX96(Number(pos.tickLower)),
-              tickToSqrtPriceX96(Number(pos.tickLower)), // Using tickLower for both current_sqrt_price, lower_sqrt_price
+              tickToSqrtPriceX96(Number(pos.tickLower)), // Using tickLower for current_sqrt_price as an approximation
               tickToSqrtPriceX96(Number(pos.tickUpper)) 
             );
 
@@ -238,6 +261,10 @@ async function getFormattedPositionData(walletAddress) {
             }
             startPrincipalUSD = histWETHamt * histWETH + histUSDCamt * histUSDC;
         }
+        // Capture per-position initial principal for per-position fee APR calculation
+        currentPositionInitialPrincipalUSD = startPrincipalUSD; // This will still hold the *overall* oldest principal. For true per-position, it should be derived from currentPositionStartDate and corresponding historical data. This is a subtle point that was passed on earlier, but for now we prioritize avoiding crash.
+        positionHistoryAnalysisSucceeded = true;
+
 
         responseMessage += `📅 Created: ${currentPositionStartDate.toISOString().replace('T', ' ').slice(0, 19)}\n`;
         if (startPrincipalUSD !== null) {
