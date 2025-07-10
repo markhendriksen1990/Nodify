@@ -81,50 +81,10 @@ async function getTokenMeta(addr) {
   }
 }
 
-// MODIFIED: getUsdPrices to use CoinLore (current prices)
 async function getUsdPrices() {
-  try {
-    const res = await fetch("https://api.coinlore.net/api/tickers/"); // CoinLore API for tickers
-    
-    if (!res.ok) {
-        console.error(`CoinLore API responded with status: ${res.status} ${res.statusText}`);
-        const errorBody = await res.text();
-        console.error(`CoinLore API error body: ${errorBody.substring(0, 200)}...`);
-        throw new Error(`CoinLore API failed to fetch prices: ${res.status}`);
-    }
-
-    const d = await res.json();
-    
-    if (!d || !Array.isArray(d.data)) {
-        console.error("CoinLore API returned unexpected data structure for tickers:", JSON.stringify(d));
-        throw new Error("CoinLore API returned incomplete or malformed price data.");
-    }
-
-    let wethPrice = 0;
-    let usdcPrice = 0;
-
-    for (const ticker of d.data) {
-        if (ticker.symbol === "WETH" && ticker.price_usd) {
-            wethPrice = parseFloat(ticker.price_usd);
-        }
-        if (ticker.symbol === "USDC" && ticker.price_usd) {
-            usdcPrice = parseFloat(ticker.price_usd);
-        }
-        if (wethPrice > 0 && usdcPrice > 0) {
-            break; // Found both, exit loop
-        }
-    }
-
-    if (wethPrice === 0 || usdcPrice === 0) {
-        throw new Error("Could not find WETH or USDC prices in CoinLore API response (symbols not found or price_usd missing).");
-    }
-
-    return { WETH: wethPrice, USDC: usdcPrice };
-  } catch (error) {
-    console.error(`Failed to get CURRENT USD prices from CoinLore: ${error.message}`);
-    // Fallback to default prices if CoinLore fails
-    return { WETH: 0, USDC: 1 }; 
-  }
+  const res = await fetch("https://api.coingecko.com/api/v3/simple/price?ids=ethereum,usd-coin&vs_currencies=usd");
+  const d = await res.json();
+  return { WETH: d.ethereum.usd, USDC: d["usd-coin"].usd };
 }
 
 function getRatio(weth, usdc) {
@@ -155,15 +115,15 @@ function formatElapsedDaysHours(ms) {
   return `${days} days, ${hours} hours`;
 }
 
-// RESTORED: getMintEventBlock to its specific previous working state
+// --- Helper to efficiently find mint event for tokenId ---
 async function getMintEventBlock(manager, tokenId, provider, ownerAddress) {
   const latestBlock = await provider.getBlockNumber();
   const zeroAddress = "0x0000000000000000000000000000000000000000";
-  let fromBlock = latestBlock - 49999; // Retaining 49999 as requested
+  let fromBlock = latestBlock - 49999;
   let toBlock = latestBlock;
   ownerAddress = ownerAddress.toLowerCase();
 
-  while (toBlock >= 0) { // Retaining no explicit MAX_BLOCK_SEARCH_DEPTH limit as in your provided version
+  while (toBlock >= 0) {
     if (fromBlock < 0) fromBlock = 0;
     const filter = manager.filters.Transfer(zeroAddress, null, tokenId);
     try {
@@ -171,51 +131,30 @@ async function getMintEventBlock(manager, tokenId, provider, ownerAddress) {
       const mint = events.find(e => e.args && e.args.to.toLowerCase() === ownerAddress);
       if (mint) return mint.blockNumber;
     } catch (e) {
-      // Retaining original error handling for block range errors: ignore and reduce window
-      console.warn(`Error querying block range ${fromBlock}-${toBlock}: ${e.message}. Ignoring and reducing window.`); // Added console.warn for visibility
+      // Ignore range errors, just reduce window
     }
     toBlock = fromBlock - 1;
-    fromBlock = toBlock - 49999; // Retaining 49999 as requested
+    fromBlock = toBlock - 49999;
   }
-  throw new Error("Mint event not found for tokenId"); // Original error message
+  throw new Error("Mint event not found for tokenId");
 }
 
-// MODIFIED: fetchHistoricalPrice to use CoinGecko (historical prices)
+async function getBlockTimestamp(blockNumber) {
+  const block = await provider.getBlock(blockNumber);
+  return block.timestamp * 1000; // JS Date expects ms
+}
+
 async function fetchHistoricalPrice(coinId, dateStr) {
-  try {
-    const url = `https://api.coingecko.com/api/v3/coins/${coinId}/history?date=${dateStr}`;
-    const res = await fetch(url);
-
-    if (!res.ok) {
-        console.error(`CoinGecko Historical API responded with status: ${res.status} ${res.statusText}`);
-        const errorBody = await res.text();
-        console.error(`CoinGecko Historical API error body: ${errorBody.substring(0, 200)}...`);
-        throw new Error(`CoinGecko Historical API failed to fetch price for ${coinId} on ${dateStr}: ${res.status}`);
-    }
-
-    const data = await res.json();
-    
-    if (!data || !data.market_data || !data.market_data.current_price || !data.market_data.current_price.usd) {
-        console.error(`CoinGecko Historical API returned unexpected data structure for ${coinId} on ${dateStr}:`, JSON.stringify(data));
-        throw new Error(`CoinGecko Historical API returned incomplete data for ${coinId} on ${dateStr}.`);
-    }
-
-    return data.market_data.current_price.usd || 0;
-  } catch (error) {
-    console.error(`Failed to get HISTORICAL USD price from CoinGecko for ${coinId} on ${dateStr}: ${error.message}`);
-    throw error; // Re-throw to propagate to position history analysis
-  }
+  const url = `https://api.coingecko.com/api/v3/coins/${coinId}/history?date=${dateStr}`;
+  const res = await fetch(url);
+  const data = await res.json();
+  return data.market_data?.current_price?.usd || 0;
 }
 
 // --- Refactored LP Position Data Fetcher ---
 async function getFormattedPositionData(walletAddress) {
   let responseMessage = "";
-  let prices = { WETH: 0, USDC: 0 }; // Initialize prices to avoid errors if getUsdPrices fails
-
   try {
-    // Fetch CURRENT prices from CoinLore
-    prices = await getUsdPrices(); 
-
     const manager = new ethers.Contract(managerAddress, managerAbi, provider);
     const pool = new ethers.Contract(poolAddress, poolAbi, provider);
 
@@ -240,10 +179,12 @@ async function getFormattedPositionData(walletAddress) {
       return responseMessage;
     }
 
-    let totalFeeUSD = 0;
-    let startPrincipalUSD = null;
-    let startDate = null;
-    let lastPortfolioValue = 0;
+    const prices = await getUsdPrices();
+
+    let totalPortfolioFeesUSD = 0; // Renamed to clearly separate from per-position fees
+    let oldestPositionStartDate = null;
+    let oldestPositionInitialPrincipalUSD = null;
+    let currentTotalPortfolioValue = 0; // Accumulates total value of all positions including fees
 
     for (let i = 0n; i < balance; i++) {
       responseMessage += `\n--- *Position #${i.toString()}* ---\n`;
@@ -257,73 +198,53 @@ async function getFormattedPositionData(walletAddress) {
       responseMessage += `🔸 Pool: ${t0.symbol}/${t1.symbol}\n`;
 
       let currentPositionStartDate = null;
-      let currentPositionInitialPrincipalUSD = null; 
+      let currentPositionInitialPrincipalUSD = null;
       let positionHistoryAnalysisSucceeded = false;
 
-      // Get mint event and analyze initial investment (uses CoinGecko for historical)
+      // Get mint event and analyze initial investment for THIS position
       try {
         const mintBlock = await getMintEventBlock(manager, tokenId, provider, walletAddress);
         const startTimestampMs = await getBlockTimestamp(mintBlock);
         currentPositionStartDate = new Date(startTimestampMs);
         
-        // Only set overall startDate and startPrincipalUSD from the oldest position if not set yet, or update if this is older
-        if (!startDate || currentPositionStartDate.getTime() < startDate.getTime()) {
-            startDate = currentPositionStartDate;
-            const day = startDate.getDate().toString().padStart(2, '0');
-            const month = (startDate.getMonth() + 1).toString().padStart(2, '0');
-            const year = startDate.getFullYear();
-            const dateStr = `${day}-${month}-${year}`;
-            // Use CoinGecko for historical prices here
-            const histWETH = await fetchHistoricalPrice('ethereum', dateStr);
-            const histUSDC = await fetchHistoricalPrice('usd-coin', dateStr);
-
-            const [histAmt0, histAmt1] = getAmountsFromLiquidity(
-              pos.liquidity,
-              tickToSqrtPriceX96(Number(pos.tickLower)),
-              tickToSqrtPriceX96(Number(pos.tickLower)), 
-              tickToSqrtPriceX96(Number(pos.tickUpper)) 
-            );
-
-            let histWETHamt = 0, histUSDCamt = 0;
-            if (t0.symbol.toUpperCase() === "WETH") {
-              histWETHamt = parseFloat(formatUnits(histAmt0, t0.decimals));
-              histUSDCamt = parseFloat(formatUnits(histAmt1, t1.decimals));
-            } else {
-              histWETHamt = parseFloat(formatUnits(histAmt1, t1.decimals));
-              histUSDCamt = parseFloat(formatUnits(histAmt0, t0.decimals));
-            }
-            startPrincipalUSD = histWETHamt * histWETH + histUSDCamt * histUSDC;
+        // Update oldestPositionStartDate and oldestPositionInitialPrincipalUSD for OVERALL summary
+        if (!oldestPositionStartDate || currentPositionStartDate.getTime() < oldestPositionStartDate.getTime()) {
+            oldestPositionStartDate = currentPositionStartDate;
         }
-        
-        // For *this specific position*, calculate its initial principal based on its mint date
-        // Use CoinGecko for historical prices here
-        const dayCurrent = currentPositionStartDate.getDate().toString().padStart(2, '0');
-        const monthCurrent = (currentPositionStartDate.getMonth() + 1).toString().padStart(2, '0');
-        const yearCurrent = currentPositionStartDate.getFullYear();
-        const dateStrCurrent = `${dayCurrent}-${monthCurrent}-${yearCurrent}`;
-        const histWETHCurrent = await fetchHistoricalPrice('ethereum', dateStrCurrent);
-        const histUSDCCurrent = await fetchHistoricalPrice('usd-coin', dateStrCurrent);
 
-        const [histAmt0Current, histAmt1Current] = getAmountsFromLiquidity(
-            pos.liquidity,
-            tickToSqrtPriceX96(Number(pos.tickLower)),
-            tickToSqrtPriceX96(Number(pos.tickLower)), 
-            tickToSqrtPriceX96(Number(pos.tickUpper)) 
+        const day = currentPositionStartDate.getDate().toString().padStart(2, '0');
+        const month = (currentPositionStartDate.getMonth() + 1).toString().padStart(2, '0');
+        const year = currentPositionStartDate.getFullYear();
+        const dateStr = `${day}-${month}-${year}`;
+        const histWETH = await fetchHistoricalPrice('ethereum', dateStr);
+        const histUSDC = await fetchHistoricalPrice('usd-coin', dateStr);
+
+        const [histAmt0, histAmt1] = getAmountsFromLiquidity(
+          pos.liquidity,
+          tickToSqrtPriceX96(Number(pos.tickLower)),
+          tickToSqrtPriceX96(Number(pos.tickLower)), // Using tickLower for current_sqrt_price as an approximation
+          tickToSqrtPriceX96(Number(pos.tickUpper)) 
         );
-        let histWETHamtCurrent = 0, histUSDCamtCurrent = 0;
+
+        let histWETHamt = 0, histUSDCamt = 0;
         if (t0.symbol.toUpperCase() === "WETH") {
-            histWETHamtCurrent = parseFloat(formatUnits(histAmt0Current, t0.decimals));
-            histUSDCamtCurrent = parseFloat(formatUnits(histAmt1Current, t1.decimals));
+          histWETHamt = parseFloat(formatUnits(histAmt0, t0.decimals));
+          histUSDCamt = parseFloat(formatUnits(histAmt1, t1.decimals));
         } else {
-            histWETHamtCurrent = parseFloat(formatUnits(histAmt1Current, t1.decimals));
-            histUSDCamtCurrent = parseFloat(formatUnits(histAmt0Current, t0.decimals));
+          histWETHamt = parseFloat(formatUnits(histAmt1, t1.decimals));
+          histUSDCamt = parseFloat(formatUnits(histAmt0, t0.decimals));
         }
-        currentPositionInitialPrincipalUSD = histWETHamtCurrent * histWETHCurrent + histUSDCamtCurrent * histUSDCCurrent;
+        currentPositionInitialPrincipalUSD = histWETHamt * histWETH + histUSDCamt * histUSDC;
         positionHistoryAnalysisSucceeded = true;
+
+        if (oldestPositionInitialPrincipalUSD === null || currentPositionStartDate.getTime() === oldestPositionStartDate.getTime()) {
+             // If this is the oldest position, or it's the first one processed, set the overall initial principal
+            oldestPositionInitialPrincipalUSD = currentPositionInitialPrincipalUSD;
+        }
 
 
         responseMessage += `📅 Created: ${currentPositionStartDate.toISOString().replace('T', ' ').slice(0, 19)}\n`;
-        responseMessage += `💰 Initial Est. Investment: $${currentPositionInitialPrincipalUSD.toFixed(2)}\n`; 
+        responseMessage += `💰 Initial Est. Investment: $${currentPositionInitialPrincipalUSD.toFixed(2)}\n`;
       } catch (error) {
         responseMessage += `⚠️ Could not analyze position history: ${error.message}\n`;
       }
@@ -334,10 +255,8 @@ async function getFormattedPositionData(walletAddress) {
       const currentPrice = tickToPricePerToken0(Number(nativeTick), Number(t0.decimals), Number(t1.decimals));
 
       responseMessage += `\n📊 *Price Information*\n`;
-      responseMessage += `🏷️ Tick Range: \`[${pos.tickLower}, ${pos.tickUpper}]\`\n`;
-      responseMessage += `🏷️ Price Range: $${lowerPrice.toFixed(2)} - $${upperPrice.toFixed(2)} ${t1.symbol}/${t0.symbol}\n`; // 2 decimals
-      responseMessage += `🌐 Current Tick: \`${nativeTick}\`\n`;
-      responseMessage += `🌐 Current Price: $${currentPrice.toFixed(2)} ${t1.symbol}/${t0.symbol}\n`; // 2 decimals
+      responseMessage += `🏷️ Price Range: $${lowerPrice.toFixed(4)} - $${upperPrice.toFixed(4)} ${t1.symbol}/${t0.symbol}\n`;
+      responseMessage += `🌐 Current Price: $${currentPrice.toFixed(4)} ${t1.symbol}/${t0.symbol}\n`;
       
       const inRange = nativeTick >= pos.tickLower && nativeTick < pos.tickUpper;
       responseMessage += `📍 In Range? ${inRange ? "✅ Yes" : "❌ No"}\n`;
@@ -381,14 +300,14 @@ async function getFormattedPositionData(walletAddress) {
       const fee1 = parseFloat(formatUnits(xp[1], t1.decimals));
       const feeUSD0 = fee0 * (t0.symbol.toUpperCase() === "WETH" ? prices.WETH : prices.USDC);
       const feeUSD1 = fee1 * (t1.symbol.toUpperCase() === "WETH" ? prices.WETH : prices.USDC);
-      const totalPositionFeesUSD = feeUSD0 + feeUSD1;
+      const totalPositionFeesUSD = feeUSD0 + feeUSD1; // Fees for this specific position
 
       responseMessage += `\n💰 *Uncollected Fees*\n`;
       responseMessage += `💰 ${formatTokenAmount(fee0, 6)} ${t0.symbol} ($${feeUSD0.toFixed(2)})\n`;
       responseMessage += `💰 ${formatTokenAmount(fee1, 2)} ${t1.symbol} ($${feeUSD1.toFixed(2)})\n`;
       responseMessage += `💰 Total Fees: *$${totalPositionFeesUSD.toFixed(2)}*\n`;
 
-      // Per-Position Fee Performance (uses currentPositionStartDate and currentPositionInitialPrincipalUSD)
+      // NEW: Per-Position Fee Performance
       if (positionHistoryAnalysisSucceeded && currentPositionInitialPrincipalUSD !== null && currentPositionInitialPrincipalUSD > 0) {
           const now = new Date();
           const elapsedMs = now.getTime() - currentPositionStartDate.getTime();
@@ -411,41 +330,41 @@ async function getFormattedPositionData(walletAddress) {
       const currentTotalValue = principalUSD + totalPositionFeesUSD;
       responseMessage += `\n🏦 *Total Position Value (incl. fees): $${currentTotalValue.toFixed(2)}*\n`;
 
-      totalFeeUSD += (feeUSD0 + feeUSD1);
-      lastPortfolioValue = currentTotalValue;
+      totalPortfolioFeesUSD += totalPositionFeesUSD; // Accumulate for overall summary
+      currentTotalPortfolioValue += currentTotalValue; // Accumulate for overall summary
     }
 
     // --- Overall Portfolio Performance Analysis Section ---
-    if (startDate && startPrincipalUSD !== null) {
+    if (oldestPositionStartDate && oldestPositionInitialPrincipalUSD !== null && oldestPositionInitialPrincipalUSD > 0) {
         const now = new Date();
-        const elapsedMs = now.getTime() - startDate.getTime();
-        const rewardsPerHour = elapsedMs > 0 ? totalFeeUSD / (elapsedMs / 1000 / 60 / 60) : 0;
-        const rewardsPerDay = rewardsPerHour * 24;
-        const rewardsPerMonth = rewardsPerDay * 30.44;
-        const rewardsPerYear = rewardsPerDay * 365.25;
-        const totalReturn = lastPortfolioValue - startPrincipalUSD;
-        const totalReturnPercent = (totalReturn / startPrincipalUSD) * 100;
-        const feesAPR = (rewardsPerYear / startPrincipalUSD) * 100;
+        const elapsedMs = now.getTime() - oldestPositionStartDate.getTime();
+        const rewardsPerHourOverall = elapsedMs > 0 ? totalPortfolioFeesUSD / (elapsedMs / 1000 / 60 / 60) : 0;
+        const rewardsPerDayOverall = rewardsPerHourOverall * 24;
+        const rewardsPerMonthOverall = rewardsPerDayOverall * 30.44;
+        const rewardsPerYearOverall = rewardsPerDayOverall * 365.25;
+        const totalReturnOverall = currentTotalPortfolioValue - oldestPositionInitialPrincipalUSD; // Use overall current value
+        const totalReturnPercentOverall = (totalReturnOverall / oldestPositionInitialPrincipalUSD) * 100;
+        const feesAPROverall = (rewardsPerYearOverall / oldestPositionInitialPrincipalUSD) * 100;
 
         responseMessage += `\n=== *OVERALL PORTFOLIO PERFORMANCE* ===\n`;
-        responseMessage += `📅 Oldest Position: ${startDate.toISOString().replace('T', ' ').slice(0, 19)}\n`;
+        responseMessage += `📅 Oldest Position Created: ${oldestPositionStartDate.toISOString().replace('T', ' ').slice(0, 19)}\n`;
         responseMessage += `📅 Analysis Period: ${formatElapsedDaysHours(elapsedMs)}\n`;
-        responseMessage += `💰 Initial Investment: $${startPrincipalUSD.toFixed(2)}\n`;
-        responseMessage += `💰 Current Value: $${lastPortfolioValue.toFixed(2)}\n`;
-        responseMessage += `💰 Total Return: $${totalReturn.toFixed(2)} (${totalReturnPercent.toFixed(2)}%)\n`;
+        responseMessage += `💰 Initial Total Investment: $${oldestPositionInitialPrincipalUSD.toFixed(2)}\n`;
+        responseMessage += `💰 Current Total Portfolio Value: $${currentTotalPortfolioValue.toFixed(2)}\n`;
+        responseMessage += `💰 Total Return: $${totalReturnOverall.toFixed(2)} (${totalReturnPercentOverall.toFixed(2)}%)\n`;
         
-        responseMessage += `\n📊 *Fee Performance*\n`;
-        responseMessage += `💎 Total Fees Earned: $${totalFeeUSD.toFixed(2)}\n`;
-        responseMessage += `💎 Fees per hour: $${rewardsPerHour.toFixed(2)}\n`;
-        responseMessage += `💎 Fees per day: $${rewardsPerDay.toFixed(2)}\n`;
-        responseMessage += `💎 Fees per month: $${rewardsPerMonth.toFixed(2)}\n`;
-        responseMessage += `💎 Fees per year: $${rewardsPerYear.toFixed(2)}\n`;
-        responseMessage += `💎 Fees APR: ${feesAPR.toFixed(2)}%\n`;
+        responseMessage += `\n📊 *Total Fees Earned (Portfolio)*\n`;
+        responseMessage += `💎 Total Fees Earned: $${totalPortfolioFeesUSD.toFixed(2)}\n`;
+        responseMessage += `💎 Fees per hour: $${rewardsPerHourOverall.toFixed(2)}\n`;
+        responseMessage += `💎 Fees per day: $${rewardsPerDayOverall.toFixed(2)}\n`;
+        responseMessage += `💎 Fees per month: $${rewardsPerMonthOverall.toFixed(2)}\n`;
+        responseMessage += `💎 Fees per year: $${rewardsPerYearOverall.toFixed(2)}\n`;
+        responseMessage += `💎 Fees APR: ${feesAPROverall.toFixed(2)}%\n`;
 
-        responseMessage += `\n🎯 *Overall Performance*\n`;
-        responseMessage += `📈 Total APR (incl. price changes): ${((totalReturn / startPrincipalUSD) * (365.25 / (elapsedMs / (1000 * 60 * 60 * 24))) * 100).toFixed(2)}%\n`;
+        responseMessage += `\n🎯 *Overall Portfolio Performance (Total APR)*\n`;
+        responseMessage += `📈 Total APR (incl. price changes): ${((totalReturnOverall / oldestPositionInitialPrincipalUSD) * (365.25 / (elapsedMs / (1000 * 60 * 60 * 24))) * 100).toFixed(2)}%\n`;
     } else {
-        responseMessage += '\n❌ Could not determine start date or start principal USD value for overall performance analysis.\n';
+        responseMessage += '\n❌ Could not determine overall portfolio performance (initial investment unknown or zero for oldest position).\n';
     }
 
   } catch (error) {
@@ -474,42 +393,34 @@ app.post(`/bot${TELEGRAM_BOT_TOKEN}/webhook`, async (req, res) => {
     const update = req.body;
     console.log('Received Telegram Update:', JSON.stringify(update, null, 2));
 
-    // IMPORTANT: Always respond with 200 OK immediately to Telegram to acknowledge receipt
-    res.sendStatus(200);
-
-    // Process the command asynchronously in the background.
-    // This prevents Telegram from timing out if getFormattedPositionData takes a long time.
-    processTelegramCommand(update).catch(error => {
-        console.error("Unhandled error in async Telegram command processing:", error);
-        // Optionally, send a generic error message to the user here if processing fails
-        // after the initial 200 OK was sent.
-        // E.g., sendMessage(update.message.chat.id, "Sorry, a background error occurred. Please try again later.").catch(e => console.error("Failed to send async error msg:", e));
-    });
-});
-
-// NEW: Asynchronous function to process Telegram commands and send responses
-async function processTelegramCommand(update) {
+    // We expect 'message' updates
     if (update.message) {
         const messageText = update.message.text;
         const chatId = update.message.chat.id;
 
+        // Respond to /positions command or menu button
         if (messageText && messageText.startsWith('/positions')) {
             try {
+                // Send a "typing..." action immediately for better UX
                 await sendChatAction(chatId, 'typing');
+
                 const positionData = await getFormattedPositionData(myAddress);
                 await sendMessage(chatId, positionData);
             } catch (error) {
-                console.error("Error processing /positions command asynchronously:", error);
-                await sendMessage(chatId, "Sorry, I encountered an internal error while fetching positions. Please try again later.");
+                console.error("Error processing /positions command:", error);
+                await sendMessage(chatId, "Sorry, I couldn't fetch the liquidity positions right now. Please try again later.");
             }
         } else if (messageText && messageText.startsWith('/start')) {
             await sendMessage(chatId, "Welcome! I can provide you with information about your Uniswap V3 liquidity positions. Type /positions to get a summary.");
         } else {
+            // Generic response for unknown commands or messages
             await sendMessage(chatId, "I received your message, but I only understand the /positions command. If you want to see your positions, type /positions or select it from the menu.");
         }
     }
-}
 
+    // Always respond with 200 OK to Telegram to acknowledge receipt
+    res.sendStatus(200);
+});
 
 // Function to send messages back to Telegram
 async function sendMessage(chatId, text) {
