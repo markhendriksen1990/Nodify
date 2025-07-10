@@ -155,30 +155,29 @@ function formatElapsedDaysHours(ms) {
   return `${days} days, ${hours} hours`;
 }
 
-// OPTIMIZED: getMintEventBlock for search depth
+// RESTORED: getMintEventBlock to its specific previous working state
 async function getMintEventBlock(manager, tokenId, provider, ownerAddress) {
   const latestBlock = await provider.getBlockNumber();
   const zeroAddress = "0x0000000000000000000000000000000000000000";
-  const MAX_BLOCK_SEARCH_DEPTH = 500000; 
-                                        
-  let fromBlock = latestBlock - 49999; 
+  let fromBlock = latestBlock - 49999; // Retaining 49999 as requested
   let toBlock = latestBlock;
   ownerAddress = ownerAddress.toLowerCase();
 
-  while (toBlock >= 0 && (latestBlock - fromBlock) < MAX_BLOCK_SEARCH_DEPTH) { 
-    if (fromBlock < 0) fromBlock = 0; 
+  while (toBlock >= 0) { // Retaining no explicit MAX_BLOCK_SEARCH_DEPTH limit as in your provided version
+    if (fromBlock < 0) fromBlock = 0;
     const filter = manager.filters.Transfer(zeroAddress, null, tokenId);
     try {
       const events = await manager.queryFilter(filter, fromBlock, toBlock);
       const mint = events.find(e => e.args && e.args.to.toLowerCase() === ownerAddress);
-      if (mint) return mint.blockNumber; 
+      if (mint) return mint.blockNumber;
     } catch (e) {
-      console.warn(`Error querying block range ${fromBlock}-${toBlock}: ${e.message}. Adjusting search window.`);
+      // Retaining original error handling for block range errors: ignore and reduce window
+      console.warn(`Error querying block range ${fromBlock}-${toBlock}: ${e.message}. Ignoring and reducing window.`); // Added console.warn for visibility
     }
     toBlock = fromBlock - 1;
-    fromBlock = toBlock - 49999;
+    fromBlock = toBlock - 49999; // Retaining 49999 as requested
   }
-  throw new Error(`Mint event not found for tokenId within the last ${MAX_BLOCK_SEARCH_DEPTH} blocks.`);
+  throw new Error("Mint event not found for tokenId"); // Original error message
 }
 
 // MODIFIED: fetchHistoricalPrice to use CoinGecko (historical prices)
@@ -196,7 +195,6 @@ async function fetchHistoricalPrice(coinId, dateStr) {
 
     const data = await res.json();
     
-    // Check if expected data exists for historical price
     if (!data || !data.market_data || !data.market_data.current_price || !data.market_data.current_price.usd) {
         console.error(`CoinGecko Historical API returned unexpected data structure for ${coinId} on ${dateStr}:`, JSON.stringify(data));
         throw new Error(`CoinGecko Historical API returned incomplete data for ${coinId} on ${dateStr}.`);
@@ -205,8 +203,6 @@ async function fetchHistoricalPrice(coinId, dateStr) {
     return data.market_data.current_price.usd || 0;
   } catch (error) {
     console.error(`Failed to get HISTORICAL USD price from CoinGecko for ${coinId} on ${dateStr}: ${error.message}`);
-    // Return 0 or rethrow, depending on how critical historical price is for overall flow.
-    // Throwing an error will cause the 'Could not analyze position history' message.
     throw error; // Re-throw to propagate to position history analysis
   }
 }
@@ -478,34 +474,42 @@ app.post(`/bot${TELEGRAM_BOT_TOKEN}/webhook`, async (req, res) => {
     const update = req.body;
     console.log('Received Telegram Update:', JSON.stringify(update, null, 2));
 
-    // We expect 'message' updates
+    // IMPORTANT: Always respond with 200 OK immediately to Telegram to acknowledge receipt
+    res.sendStatus(200);
+
+    // Process the command asynchronously in the background.
+    // This prevents Telegram from timing out if getFormattedPositionData takes a long time.
+    processTelegramCommand(update).catch(error => {
+        console.error("Unhandled error in async Telegram command processing:", error);
+        // Optionally, send a generic error message to the user here if processing fails
+        // after the initial 200 OK was sent.
+        // E.g., sendMessage(update.message.chat.id, "Sorry, a background error occurred. Please try again later.").catch(e => console.error("Failed to send async error msg:", e));
+    });
+});
+
+// NEW: Asynchronous function to process Telegram commands and send responses
+async function processTelegramCommand(update) {
     if (update.message) {
         const messageText = update.message.text;
         const chatId = update.message.chat.id;
 
-        // Respond to /positions command or menu button
         if (messageText && messageText.startsWith('/positions')) {
             try {
-                // Send a "typing..." action immediately for better UX
                 await sendChatAction(chatId, 'typing');
-
                 const positionData = await getFormattedPositionData(myAddress);
                 await sendMessage(chatId, positionData);
             } catch (error) {
-                console.error("Error processing /positions command:", error);
-                await sendMessage(chatId, "Sorry, I couldn't fetch the liquidity positions right now. Please try again later.");
+                console.error("Error processing /positions command asynchronously:", error);
+                await sendMessage(chatId, "Sorry, I encountered an internal error while fetching positions. Please try again later.");
             }
         } else if (messageText && messageText.startsWith('/start')) {
             await sendMessage(chatId, "Welcome! I can provide you with information about your Uniswap V3 liquidity positions. Type /positions to get a summary.");
         } else {
-            // Generic response for unknown commands or messages
             await sendMessage(chatId, "I received your message, but I only understand the /positions command. If you want to see your positions, type /positions or select it from the menu.");
         }
     }
+}
 
-    // Always respond with 200 OK to Telegram to acknowledge receipt
-    res.sendStatus(200);
-});
 
 // Function to send messages back to Telegram
 async function sendMessage(chatId, text) {
