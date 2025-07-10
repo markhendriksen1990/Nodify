@@ -81,29 +81,49 @@ async function getTokenMeta(addr) {
   }
 }
 
-// Corrected getUsdPrices for robustness against CoinGecko API issues
+// MODIFIED: getUsdPrices to use CoinLore (current prices)
 async function getUsdPrices() {
   try {
-    const res = await fetch("https://api.coingecko.com/api/v3/simple/price?ids=ethereum,usd-coin&vs_currencies=usd");
+    const res = await fetch("https://api.coinlore.net/api/tickers/"); // CoinLore API for tickers
     
     if (!res.ok) {
-        console.error(`CoinGecko API responded with status: ${res.status} ${res.statusText}`);
+        console.error(`CoinLore API responded with status: ${res.status} ${res.statusText}`);
         const errorBody = await res.text();
-        console.error(`CoinGecko API error body: ${errorBody.substring(0, 200)}...`);
-        throw new Error(`CoinGecko API failed to fetch prices: ${res.status}`);
+        console.error(`CoinLore API error body: ${errorBody.substring(0, 200)}...`);
+        throw new Error(`CoinLore API failed to fetch prices: ${res.status}`);
     }
 
     const d = await res.json();
     
-    if (!d || !d.ethereum || !d.ethereum.usd || !d["usd-coin"] || !d["usd-coin"].usd) {
-        console.error("CoinGecko API returned unexpected data structure:", JSON.stringify(d));
-        throw new Error("CoinGecko API returned incomplete price data.");
+    if (!d || !Array.isArray(d.data)) {
+        console.error("CoinLore API returned unexpected data structure for tickers:", JSON.stringify(d));
+        throw new Error("CoinLore API returned incomplete or malformed price data.");
     }
 
-    return { WETH: d.ethereum.usd, USDC: d["usd-coin"].usd };
+    let wethPrice = 0;
+    let usdcPrice = 0;
+
+    for (const ticker of d.data) {
+        if (ticker.symbol === "WETH" && ticker.price_usd) {
+            wethPrice = parseFloat(ticker.price_usd);
+        }
+        if (ticker.symbol === "USDC" && ticker.price_usd) {
+            usdcPrice = parseFloat(ticker.price_usd);
+        }
+        if (wethPrice > 0 && usdcPrice > 0) {
+            break; // Found both, exit loop
+        }
+    }
+
+    if (wethPrice === 0 || usdcPrice === 0) {
+        throw new Error("Could not find WETH or USDC prices in CoinLore API response (symbols not found or price_usd missing).");
+    }
+
+    return { WETH: wethPrice, USDC: usdcPrice };
   } catch (error) {
-    console.error(`Failed to get USD prices from CoinGecko: ${error.message}`);
-    return { WETH: 0, USDC: 1 }; // Fallback prices to prevent crash
+    console.error(`Failed to get CURRENT USD prices from CoinLore: ${error.message}`);
+    // Fallback to default prices if CoinLore fails
+    return { WETH: 0, USDC: 1 }; 
   }
 }
 
@@ -135,47 +155,60 @@ function formatElapsedDaysHours(ms) {
   return `${days} days, ${hours} hours`;
 }
 
-// CORRECTED: Added MAX_BLOCK_SEARCH_DEPTH to limit search range
+// OPTIMIZED: getMintEventBlock for search depth
 async function getMintEventBlock(manager, tokenId, provider, ownerAddress) {
   const latestBlock = await provider.getBlockNumber();
   const zeroAddress = "0x0000000000000000000000000000000000000000";
-  const MAX_BLOCK_SEARCH_DEPTH = 500000; // Roughly 2-3 months on Base at 2s/block avg
-                                        // This prevents excessively long searches and timeouts
-  let fromBlock = latestBlock - 49999; // Initial search window
+  const MAX_BLOCK_SEARCH_DEPTH = 500000; 
+                                        
+  let fromBlock = latestBlock - 49999; 
   let toBlock = latestBlock;
   ownerAddress = ownerAddress.toLowerCase();
 
-  // Loop while within valid block range and not exceeding max search depth
-  while (toBlock >= 0 && (latestBlock - fromBlock) < MAX_BLOCK_SEARCH_DEPTH) {
-    if (fromBlock < 0) fromBlock = 0; // Ensure fromBlock is not negative
+  while (toBlock >= 0 && (latestBlock - fromBlock) < MAX_BLOCK_SEARCH_DEPTH) { 
+    if (fromBlock < 0) fromBlock = 0; 
     const filter = manager.filters.Transfer(zeroAddress, null, tokenId);
     try {
       const events = await manager.queryFilter(filter, fromBlock, toBlock);
       const mint = events.find(e => e.args && e.args.to.toLowerCase() === ownerAddress);
-      if (mint) return mint.blockNumber; // Mint event found
+      if (mint) return mint.blockNumber; 
     } catch (e) {
       console.warn(`Error querying block range ${fromBlock}-${toBlock}: ${e.message}. Adjusting search window.`);
-      // If an error occurs in a range, often due to RPC limits, narrow the search window
-      // by simply moving to the next smaller window.
     }
-    // Move to the next older block range
     toBlock = fromBlock - 1;
     fromBlock = toBlock - 49999;
   }
-  // If loop finishes without finding mint event within depth, throw specific error
   throw new Error(`Mint event not found for tokenId within the last ${MAX_BLOCK_SEARCH_DEPTH} blocks.`);
 }
 
-async function getBlockTimestamp(blockNumber) {
-  const block = await provider.getBlock(blockNumber);
-  return block.timestamp * 1000; // JS Date expects ms
-}
-
+// MODIFIED: fetchHistoricalPrice to use CoinGecko (historical prices)
 async function fetchHistoricalPrice(coinId, dateStr) {
-  const url = `https://api.coingecko.com/api/v3/coins/${coinId}/history?date=${dateStr}`;
-  const res = await fetch(url);
-  const data = await res.json();
-  return data.market_data?.current_price?.usd || 0;
+  try {
+    const url = `https://api.coingecko.com/api/v3/coins/${coinId}/history?date=${dateStr}`;
+    const res = await fetch(url);
+
+    if (!res.ok) {
+        console.error(`CoinGecko Historical API responded with status: ${res.status} ${res.statusText}`);
+        const errorBody = await res.text();
+        console.error(`CoinGecko Historical API error body: ${errorBody.substring(0, 200)}...`);
+        throw new Error(`CoinGecko Historical API failed to fetch price for ${coinId} on ${dateStr}: ${res.status}`);
+    }
+
+    const data = await res.json();
+    
+    // Check if expected data exists for historical price
+    if (!data || !data.market_data || !data.market_data.current_price || !data.market_data.current_price.usd) {
+        console.error(`CoinGecko Historical API returned unexpected data structure for ${coinId} on ${dateStr}:`, JSON.stringify(data));
+        throw new Error(`CoinGecko Historical API returned incomplete data for ${coinId} on ${dateStr}.`);
+    }
+
+    return data.market_data.current_price.usd || 0;
+  } catch (error) {
+    console.error(`Failed to get HISTORICAL USD price from CoinGecko for ${coinId} on ${dateStr}: ${error.message}`);
+    // Return 0 or rethrow, depending on how critical historical price is for overall flow.
+    // Throwing an error will cause the 'Could not analyze position history' message.
+    throw error; // Re-throw to propagate to position history analysis
+  }
 }
 
 // --- Refactored LP Position Data Fetcher ---
@@ -184,7 +217,8 @@ async function getFormattedPositionData(walletAddress) {
   let prices = { WETH: 0, USDC: 0 }; // Initialize prices to avoid errors if getUsdPrices fails
 
   try {
-    prices = await getUsdPrices(); // Fetch prices first and handle potential errors
+    // Fetch CURRENT prices from CoinLore
+    prices = await getUsdPrices(); 
 
     const manager = new ethers.Contract(managerAddress, managerAbi, provider);
     const pool = new ethers.Contract(poolAddress, poolAbi, provider);
@@ -227,10 +261,10 @@ async function getFormattedPositionData(walletAddress) {
       responseMessage += `🔸 Pool: ${t0.symbol}/${t1.symbol}\n`;
 
       let currentPositionStartDate = null;
-      let currentPositionInitialPrincipalUSD = null; // This variable is for per-position initial principal
+      let currentPositionInitialPrincipalUSD = null; 
       let positionHistoryAnalysisSucceeded = false;
 
-      // Get mint event and analyze initial investment
+      // Get mint event and analyze initial investment (uses CoinGecko for historical)
       try {
         const mintBlock = await getMintEventBlock(manager, tokenId, provider, walletAddress);
         const startTimestampMs = await getBlockTimestamp(mintBlock);
@@ -239,18 +273,18 @@ async function getFormattedPositionData(walletAddress) {
         // Only set overall startDate and startPrincipalUSD from the oldest position if not set yet, or update if this is older
         if (!startDate || currentPositionStartDate.getTime() < startDate.getTime()) {
             startDate = currentPositionStartDate;
-            // The overall startPrincipalUSD is derived from this oldest position's historical data
             const day = startDate.getDate().toString().padStart(2, '0');
             const month = (startDate.getMonth() + 1).toString().padStart(2, '0');
             const year = startDate.getFullYear();
             const dateStr = `${day}-${month}-${year}`;
+            // Use CoinGecko for historical prices here
             const histWETH = await fetchHistoricalPrice('ethereum', dateStr);
             const histUSDC = await fetchHistoricalPrice('usd-coin', dateStr);
 
             const [histAmt0, histAmt1] = getAmountsFromLiquidity(
               pos.liquidity,
               tickToSqrtPriceX96(Number(pos.tickLower)),
-              tickToSqrtPriceX96(Number(pos.tickLower)), // Approximating current price with lower tick for historical amount
+              tickToSqrtPriceX96(Number(pos.tickLower)), 
               tickToSqrtPriceX96(Number(pos.tickUpper)) 
             );
 
@@ -264,9 +298,9 @@ async function getFormattedPositionData(walletAddress) {
             }
             startPrincipalUSD = histWETHamt * histWETH + histUSDCamt * histUSDC;
         }
-
+        
         // For *this specific position*, calculate its initial principal based on its mint date
-        // (even if it's not the overall oldest). This is crucial for per-position APR.
+        // Use CoinGecko for historical prices here
         const dayCurrent = currentPositionStartDate.getDate().toString().padStart(2, '0');
         const monthCurrent = (currentPositionStartDate.getMonth() + 1).toString().padStart(2, '0');
         const yearCurrent = currentPositionStartDate.getFullYear();
@@ -277,7 +311,7 @@ async function getFormattedPositionData(walletAddress) {
         const [histAmt0Current, histAmt1Current] = getAmountsFromLiquidity(
             pos.liquidity,
             tickToSqrtPriceX96(Number(pos.tickLower)),
-            tickToSqrtPriceX96(Number(pos.tickLower)), // Approximating current price with lower tick for historical amount
+            tickToSqrtPriceX96(Number(pos.tickLower)), 
             tickToSqrtPriceX96(Number(pos.tickUpper)) 
         );
         let histWETHamtCurrent = 0, histUSDCamtCurrent = 0;
@@ -293,7 +327,7 @@ async function getFormattedPositionData(walletAddress) {
 
 
         responseMessage += `📅 Created: ${currentPositionStartDate.toISOString().replace('T', ' ').slice(0, 19)}\n`;
-        responseMessage += `💰 Initial Est. Investment: $${currentPositionInitialPrincipalUSD.toFixed(2)}\n`; // Use per-position principal here
+        responseMessage += `💰 Initial Est. Investment: $${currentPositionInitialPrincipalUSD.toFixed(2)}\n`; 
       } catch (error) {
         responseMessage += `⚠️ Could not analyze position history: ${error.message}\n`;
       }
