@@ -81,22 +81,20 @@ async function getTokenMeta(addr) {
   }
 }
 
-// CORRECTED: Added robustness to getUsdPrices
+// Corrected getUsdPrices for robustness against CoinGecko API issues
 async function getUsdPrices() {
   try {
     const res = await fetch("https://api.coingecko.com/api/v3/simple/price?ids=ethereum,usd-coin&vs_currencies=usd");
     
     if (!res.ok) {
         console.error(`CoinGecko API responded with status: ${res.status} ${res.statusText}`);
-        // Attempt to read body for more info, but don't crash
         const errorBody = await res.text();
-        console.error(`CoinGecko API error body: ${errorBody.substring(0, 200)}...`); // Log first 200 chars
+        console.error(`CoinGecko API error body: ${errorBody.substring(0, 200)}...`);
         throw new Error(`CoinGecko API failed to fetch prices: ${res.status}`);
     }
 
     const d = await res.json();
     
-    // Check if expected data exists
     if (!d || !d.ethereum || !d.ethereum.usd || !d["usd-coin"] || !d["usd-coin"].usd) {
         console.error("CoinGecko API returned unexpected data structure:", JSON.stringify(d));
         throw new Error("CoinGecko API returned incomplete price data.");
@@ -105,10 +103,7 @@ async function getUsdPrices() {
     return { WETH: d.ethereum.usd, USDC: d["usd-coin"].usd };
   } catch (error) {
     console.error(`Failed to get USD prices from CoinGecko: ${error.message}`);
-    // Fallback to default prices or 0 to prevent crash, affecting total USD values
-    // This will allow the bot to respond, but with potentially inaccurate USD values
-    // (e.g., if WETH price is missing, it will default to 0 for calculations).
-    return { WETH: 0, USDC: 1 }; // Default USDC to 1 to at least show USDC values correctly
+    return { WETH: 0, USDC: 1 }; // Fallback prices to prevent crash
   }
 }
 
@@ -140,28 +135,35 @@ function formatElapsedDaysHours(ms) {
   return `${days} days, ${hours} hours`;
 }
 
-// --- Helper to efficiently find mint event for tokenId ---
+// CORRECTED: Added MAX_BLOCK_SEARCH_DEPTH to limit search range
 async function getMintEventBlock(manager, tokenId, provider, ownerAddress) {
   const latestBlock = await provider.getBlockNumber();
   const zeroAddress = "0x0000000000000000000000000000000000000000";
-  let fromBlock = latestBlock - 49999;
+  const MAX_BLOCK_SEARCH_DEPTH = 500000; // Roughly 2-3 months on Base at 2s/block avg
+                                        // This prevents excessively long searches and timeouts
+  let fromBlock = latestBlock - 49999; // Initial search window
   let toBlock = latestBlock;
   ownerAddress = ownerAddress.toLowerCase();
 
-  while (toBlock >= 0) {
-    if (fromBlock < 0) fromBlock = 0;
+  // Loop while within valid block range and not exceeding max search depth
+  while (toBlock >= 0 && (latestBlock - fromBlock) < MAX_BLOCK_SEARCH_DEPTH) {
+    if (fromBlock < 0) fromBlock = 0; // Ensure fromBlock is not negative
     const filter = manager.filters.Transfer(zeroAddress, null, tokenId);
     try {
       const events = await manager.queryFilter(filter, fromBlock, toBlock);
       const mint = events.find(e => e.args && e.args.to.toLowerCase() === ownerAddress);
-      if (mint) return mint.blockNumber;
+      if (mint) return mint.blockNumber; // Mint event found
     } catch (e) {
-      // Ignore range errors, just reduce window
+      console.warn(`Error querying block range ${fromBlock}-${toBlock}: ${e.message}. Adjusting search window.`);
+      // If an error occurs in a range, often due to RPC limits, narrow the search window
+      // by simply moving to the next smaller window.
     }
+    // Move to the next older block range
     toBlock = fromBlock - 1;
     fromBlock = toBlock - 49999;
   }
-  throw new Error("Mint event not found for tokenId");
+  // If loop finishes without finding mint event within depth, throw specific error
+  throw new Error(`Mint event not found for tokenId within the last ${MAX_BLOCK_SEARCH_DEPTH} blocks.`);
 }
 
 async function getBlockTimestamp(blockNumber) {
@@ -225,7 +227,7 @@ async function getFormattedPositionData(walletAddress) {
       responseMessage += `🔸 Pool: ${t0.symbol}/${t1.symbol}\n`;
 
       let currentPositionStartDate = null;
-      let currentPositionInitialPrincipalUSD = null;
+      let currentPositionInitialPrincipalUSD = null; // This variable is for per-position initial principal
       let positionHistoryAnalysisSucceeded = false;
 
       // Get mint event and analyze initial investment
@@ -237,6 +239,7 @@ async function getFormattedPositionData(walletAddress) {
         // Only set overall startDate and startPrincipalUSD from the oldest position if not set yet, or update if this is older
         if (!startDate || currentPositionStartDate.getTime() < startDate.getTime()) {
             startDate = currentPositionStartDate;
+            // The overall startPrincipalUSD is derived from this oldest position's historical data
             const day = startDate.getDate().toString().padStart(2, '0');
             const month = (startDate.getMonth() + 1).toString().padStart(2, '0');
             const year = startDate.getFullYear();
@@ -247,7 +250,7 @@ async function getFormattedPositionData(walletAddress) {
             const [histAmt0, histAmt1] = getAmountsFromLiquidity(
               pos.liquidity,
               tickToSqrtPriceX96(Number(pos.tickLower)),
-              tickToSqrtPriceX96(Number(pos.tickLower)), // Using tickLower for current_sqrt_price as an approximation
+              tickToSqrtPriceX96(Number(pos.tickLower)), // Approximating current price with lower tick for historical amount
               tickToSqrtPriceX96(Number(pos.tickUpper)) 
             );
 
@@ -261,15 +264,36 @@ async function getFormattedPositionData(walletAddress) {
             }
             startPrincipalUSD = histWETHamt * histWETH + histUSDCamt * histUSDC;
         }
-        // Capture per-position initial principal for per-position fee APR calculation
-        currentPositionInitialPrincipalUSD = startPrincipalUSD; // This will still hold the *overall* oldest principal. For true per-position, it should be derived from currentPositionStartDate and corresponding historical data. This is a subtle point that was passed on earlier, but for now we prioritize avoiding crash.
+
+        // For *this specific position*, calculate its initial principal based on its mint date
+        // (even if it's not the overall oldest). This is crucial for per-position APR.
+        const dayCurrent = currentPositionStartDate.getDate().toString().padStart(2, '0');
+        const monthCurrent = (currentPositionStartDate.getMonth() + 1).toString().padStart(2, '0');
+        const yearCurrent = currentPositionStartDate.getFullYear();
+        const dateStrCurrent = `${dayCurrent}-${monthCurrent}-${yearCurrent}`;
+        const histWETHCurrent = await fetchHistoricalPrice('ethereum', dateStrCurrent);
+        const histUSDCCurrent = await fetchHistoricalPrice('usd-coin', dateStrCurrent);
+
+        const [histAmt0Current, histAmt1Current] = getAmountsFromLiquidity(
+            pos.liquidity,
+            tickToSqrtPriceX96(Number(pos.tickLower)),
+            tickToSqrtPriceX96(Number(pos.tickLower)), // Approximating current price with lower tick for historical amount
+            tickToSqrtPriceX96(Number(pos.tickUpper)) 
+        );
+        let histWETHamtCurrent = 0, histUSDCamtCurrent = 0;
+        if (t0.symbol.toUpperCase() === "WETH") {
+            histWETHamtCurrent = parseFloat(formatUnits(histAmt0Current, t0.decimals));
+            histUSDCamtCurrent = parseFloat(formatUnits(histAmt1Current, t1.decimals));
+        } else {
+            histWETHamtCurrent = parseFloat(formatUnits(histAmt1Current, t1.decimals));
+            histUSDCamtCurrent = parseFloat(formatUnits(histAmt0Current, t0.decimals));
+        }
+        currentPositionInitialPrincipalUSD = histWETHamtCurrent * histWETHCurrent + histUSDCamtCurrent * histUSDCCurrent;
         positionHistoryAnalysisSucceeded = true;
 
 
         responseMessage += `📅 Created: ${currentPositionStartDate.toISOString().replace('T', ' ').slice(0, 19)}\n`;
-        if (startPrincipalUSD !== null) {
-            responseMessage += `💰 Initial Est. Investment: $${startPrincipalUSD.toFixed(2)}\n`;
-        }
+        responseMessage += `💰 Initial Est. Investment: $${currentPositionInitialPrincipalUSD.toFixed(2)}\n`; // Use per-position principal here
       } catch (error) {
         responseMessage += `⚠️ Could not analyze position history: ${error.message}\n`;
       }
@@ -281,9 +305,9 @@ async function getFormattedPositionData(walletAddress) {
 
       responseMessage += `\n📊 *Price Information*\n`;
       responseMessage += `🏷️ Tick Range: \`[${pos.tickLower}, ${pos.tickUpper}]\`\n`;
-      responseMessage += `🏷️ Price Range: $${lowerPrice.toFixed(4)} - $${upperPrice.toFixed(4)} ${t1.symbol}/${t0.symbol}\n`;
+      responseMessage += `🏷️ Price Range: $${lowerPrice.toFixed(2)} - $${upperPrice.toFixed(2)} ${t1.symbol}/${t0.symbol}\n`; // 2 decimals
       responseMessage += `🌐 Current Tick: \`${nativeTick}\`\n`;
-      responseMessage += `🌐 Current Price: $${currentPrice.toFixed(4)} ${t1.symbol}/${t0.symbol}\n`;
+      responseMessage += `🌐 Current Price: $${currentPrice.toFixed(2)} ${t1.symbol}/${t0.symbol}\n`; // 2 decimals
       
       const inRange = nativeTick >= pos.tickLower && nativeTick < pos.tickUpper;
       responseMessage += `📍 In Range? ${inRange ? "✅ Yes" : "❌ No"}\n`;
@@ -327,20 +351,41 @@ async function getFormattedPositionData(walletAddress) {
       const fee1 = parseFloat(formatUnits(xp[1], t1.decimals));
       const feeUSD0 = fee0 * (t0.symbol.toUpperCase() === "WETH" ? prices.WETH : prices.USDC);
       const feeUSD1 = fee1 * (t1.symbol.toUpperCase() === "WETH" ? prices.WETH : prices.USDC);
+      const totalPositionFeesUSD = feeUSD0 + feeUSD1;
 
       responseMessage += `\n💰 *Uncollected Fees*\n`;
       responseMessage += `💰 ${formatTokenAmount(fee0, 6)} ${t0.symbol} ($${feeUSD0.toFixed(2)})\n`;
       responseMessage += `💰 ${formatTokenAmount(fee1, 2)} ${t1.symbol} ($${feeUSD1.toFixed(2)})\n`;
-      responseMessage += `💰 Total Fees: *$${(feeUSD0 + feeUSD1).toFixed(2)}*\n`;
+      responseMessage += `💰 Total Fees: *$${totalPositionFeesUSD.toFixed(2)}*\n`;
 
-      const currentTotalValue = principalUSD + feeUSD0 + feeUSD1;
+      // Per-Position Fee Performance (uses currentPositionStartDate and currentPositionInitialPrincipalUSD)
+      if (positionHistoryAnalysisSucceeded && currentPositionInitialPrincipalUSD !== null && currentPositionInitialPrincipalUSD > 0) {
+          const now = new Date();
+          const elapsedMs = now.getTime() - currentPositionStartDate.getTime();
+          const rewardsPerHour = elapsedMs > 0 ? totalPositionFeesUSD / (elapsedMs / 1000 / 60 / 60) : 0;
+          const rewardsPerDay = rewardsPerHour * 24;
+          const rewardsPerMonth = rewardsPerDay * 30.44;
+          const rewardsPerYear = rewardsPerDay * 365.25;
+          const feesAPR = (rewardsPerYear / currentPositionInitialPrincipalUSD) * 100;
+
+          responseMessage += `\n📊 *Fee Performance (This Position)*\n`;
+          responseMessage += `💎 Fees per hour: $${rewardsPerHour.toFixed(2)}\n`;
+          responseMessage += `💎 Fees per day: $${rewardsPerDay.toFixed(2)}\n`;
+          responseMessage += `💎 Fees per month: $${rewardsPerMonth.toFixed(2)}\n`;
+          responseMessage += `💎 Fees per year: $${rewardsPerYear.toFixed(2)}\n`;
+          responseMessage += `💎 Fees APR: ${feesAPR.toFixed(2)}%\n`;
+      } else {
+          responseMessage += `\n⚠️ Could not determine per-position fee performance (initial investment unknown or zero).\n`;
+      }
+
+      const currentTotalValue = principalUSD + totalPositionFeesUSD;
       responseMessage += `\n🏦 *Total Position Value (incl. fees): $${currentTotalValue.toFixed(2)}*\n`;
 
       totalFeeUSD += (feeUSD0 + feeUSD1);
       lastPortfolioValue = currentTotalValue;
     }
 
-    // --- Overall Performance Analysis Section ---
+    // --- Overall Portfolio Performance Analysis Section ---
     if (startDate && startPrincipalUSD !== null) {
         const now = new Date();
         const elapsedMs = now.getTime() - startDate.getTime();
