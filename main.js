@@ -155,33 +155,28 @@ function formatElapsedDaysHours(ms) {
   return `${days} days, ${hours} hours`;
 }
 
-// OPTIMIZED: getMintEventBlock for search depth (reverted to 49999 as per latest instruction)
+// RESTORED: getMintEventBlock to its specific previous working state (49999 block query window)
 async function getMintEventBlock(manager, tokenId, provider, ownerAddress) {
   const latestBlock = await provider.getBlockNumber();
   const zeroAddress = "0x0000000000000000000000000000000000000000";
-  const MAX_BLOCK_SEARCH_DEPTH = 500000; // Overall search limit (roughly 2-3 months on Base)
-  const RPC_QUERY_WINDOW = 49999;       // As requested: Larger window per RPC call
-
-  let fromBlock = latestBlock - RPC_QUERY_WINDOW;
+  let fromBlock = latestBlock - 49999; // Retaining 49999 as requested
   let toBlock = latestBlock;
   ownerAddress = ownerAddress.toLowerCase();
 
-  while (toBlock >= 0 && (latestBlock - fromBlock) < MAX_BLOCK_SEARCH_DEPTH) { 
-    if (fromBlock < 0) fromBlock = 0; 
+  while (toBlock >= 0) { // Retaining no explicit MAX_BLOCK_SEARCH_DEPTH limit as in your provided version
+    if (fromBlock < 0) fromBlock = 0;
     const filter = manager.filters.Transfer(zeroAddress, null, tokenId);
     try {
       const events = await manager.queryFilter(filter, fromBlock, toBlock);
       const mint = events.find(e => e.args && e.args.to.toLowerCase() === ownerAddress);
-      if (mint) return mint.blockNumber; 
+      if (mint) return mint.blockNumber;
     } catch (e) {
-      console.warn(`Error querying block range ${fromBlock}-${toBlock}: ${e.message}. Attempting next window.`);
-      // Continue to next older window even if current one failed, as it might be temporary or a specific block issue.
+      console.warn(`Error querying block range ${fromBlock}-${toBlock}: ${e.message}. Ignoring and reducing window.`); // Added console.warn for visibility
     }
-    // Move to the next older block range
     toBlock = fromBlock - 1;
-    fromBlock = toBlock - RPC_QUERY_WINDOW; // Use the requested window size
+    fromBlock = toBlock - 49999; // Retaining 49999 as requested
   }
-  throw new Error(`Mint event not found for tokenId within the last ${MAX_BLOCK_SEARCH_DEPTH} blocks.`);
+  throw new Error("Mint event not found for tokenId"); // Original error message
 }
 
 // MODIFIED: fetchHistoricalPrice to use CoinGecko (historical prices)
@@ -478,15 +473,16 @@ app.post(`/bot${TELEGRAM_BOT_TOKEN}/webhook`, async (req, res) => {
     const update = req.body;
     console.log('Received Telegram Update:', JSON.stringify(update, null, 2));
 
-    // IMPORTANT: Acknowledge Telegram immediately to avoid timeouts
+    // IMPORTANT: Always respond with 200 OK immediately to Telegram to acknowledge receipt
     res.sendStatus(200);
 
-    // Process the command asynchronously in the background
-    // No 'await' here, so the function returns immediately.
+    // Process the command asynchronously in the background.
+    // This prevents Telegram from timing out if getFormattedPositionData takes a long time.
     processTelegramCommand(update).catch(error => {
         console.error("Unhandled error in async Telegram command processing:", error);
-        // Optionally send a general error message to the user if the initial processing fails
-        // but try to keep this minimal to avoid further issues if Telegram is backing off.
+        // Optionally, send a generic error message to the user here if processing fails
+        // after the initial 200 OK was sent.
+        // E.g., sendMessage(update.message.chat.id, "Sorry, a background error occurred. Please try again later.").catch(e => console.error("Failed to send async error msg:", e));
     });
 });
 
@@ -503,7 +499,7 @@ async function processTelegramCommand(update) {
                 await sendMessage(chatId, positionData);
             } catch (error) {
                 console.error("Error processing /positions command asynchronously:", error);
-                await sendMessage(chatId, "Sorry, I encountered an internal error while fetching positions. Please try again later, or contact support.");
+                await sendMessage(chatId, "Sorry, I encountered an internal error while fetching positions. Please try again later.");
             }
         } else if (messageText && messageText.startsWith('/start')) {
             await sendMessage(chatId, "Welcome! I can provide you with information about your Uniswap V3 liquidity positions. Type /positions to get a summary.");
