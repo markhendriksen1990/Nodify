@@ -17,12 +17,11 @@ const managerAddress = "0x03a520b32c04bf3beef7beb72e919cf822ed34f1";
 const poolAddress = "0xd0b53D9277642d899DF5C87A3966A349A798F224";
 const myAddress = "0x2FD24cC510b7a40b176B05A5Bb628d024e3B6886";
 
-// --- ABIs (FIXED: positions function signature) ---
+// --- ABIs ---
 const managerAbi = [
   "function balanceOf(address owner) view returns (uint256)",
   "function tokenOfOwnerByIndex(address owner, uint256 index) view returns (uint256)",
-  // CORRECTED: 'positions' function signature should take uint256 tokenId as argument
-  "function positions(uint256 tokenId) view returns (uint96 nonce, address operator, address token0, address token1, uint24 fee, int24 tickLower, int24 tickUpper, uint128 liquidity, uint256 feeGrowthInside0LastX128, uint256 feeGrowthInside1LastX128, uint128 tokensOwed0, uint128 tokensOwed1)",
+  "function positions(uint96 nonce, address operator, address token0, address token1, uint24 fee, int24 tickLower, int24 tickUpper, uint128 liquidity, uint256 feeGrowthInside0LastX128, uint256 feeGrowthInside1LastX128, uint128 tokensOwed0, uint128 tokensOwed1)",
   "event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)",
   "function collect(tuple(uint256 tokenId, address recipient, uint128 amount0Max, uint128 amount1Max)) external returns (uint256 amount0, uint256 amount1)"
 ];
@@ -42,13 +41,6 @@ const UINT128_MAX = "340282366920938463463374607431768211455";
 const { formatUnits } = ethers;
 
 // --- Utility Functions ---
-
-// Helper to escape markdown characters for Telegram messages
-function escapeMarkdown(text) {
-    if (!text || typeof text !== 'string') return '';
-    return text.replace(/[_*[\]()~`>#+-=|{}.!]/g, '\\$&');
-}
-
 function tickToSqrtPriceX96(tick) {
   const ratio = Math.pow(1.0001, Number(tick));
   const product = Math.sqrt(ratio) * (2 ** 96);
@@ -62,8 +54,9 @@ function tickToSqrtPriceX96(tick) {
 function getAmountsFromLiquidity(liquidity, sqrtPriceX96, sqrtLowerX96, sqrtUpperX96) {
   liquidity = BigInt(liquidity);
   sqrtPriceX96 = BigInt(sqrtPriceX96);
-  sqrtLowerX96 = BigInt(sqrtLowerX96);
-  sqrtUpperX96 = BigInt(sqrtUpperX96);
+  // Ensured all inputs to BigInt constructor are numeric or BigInt compatible
+  sqrtLowerX96 = BigInt(sqrtLowerX96 || 0n); // Fallback for safety
+  sqrtUpperX96 = BigInt(sqrtUpperX96 || 0n); // Fallback for safety
 
   let amount0 = 0n;
   let amount1 = 0n;
@@ -160,7 +153,7 @@ function formatTokenAmount(val, decimals = 6) {
 function formatElapsedDaysHours(ms) {
   const days = Math.floor(ms / (1000 * 60 * 60 * 24));
   const hours = Math.floor((ms % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-  return `${days} days, ${hours} hours`;
+  return `${days} days, ${hours} `;
 }
 
 // getMintEventBlock using 49999 block query window as requested
@@ -173,7 +166,7 @@ async function getMintEventBlock(manager, tokenId, provider, ownerAddress) {
   let toBlock = latestBlock;
   ownerAddress = ownerAddress.toLowerCase();
 
-  while (toBlock >= 0) { // Loop without overall MAX_BLOCK_SEARCH_DEPTH limit
+  while (toBlock >= 0) { 
     if (fromBlock < 0) fromBlock = 0;
     const filter = manager.filters.Transfer(zeroAddress, null, tokenId);
     try {
@@ -349,7 +342,7 @@ async function getFormattedPositionData(walletAddress) {
         responseMessage += `📅 Created: ${currentPositionStartDate.toISOString().replace('T', ' ').slice(0, 19)}\n`;
         responseMessage += `💰 Initial Est. Investment: $${currentPositionInitialPrincipalUSD.toFixed(2)}\n`; 
       } catch (error) {
-        responseMessage += `⚠️ Could not analyze position history: ${error.message}\n`;
+        responseMessage += `⚠️ Could not analyze position history: ${escapeMarkdown(error.message)}\n`; // Escaped error message
       }
 
       // Current position analysis
@@ -469,12 +462,12 @@ async function getFormattedPositionData(walletAddress) {
         responseMessage += `\n🎯 *Overall Performance*\n`;
         responseMessage += `📈 Total APR (incl. price changes): ${((totalReturn / startPrincipalUSD) * (365.25 / (elapsedMs / (1000 * 60 * 60 * 24))) * 100).toFixed(2)}%\n`;
     } else {
-        responseMessage += '\n❌ Could not determine start date or start principal USD value for overall performance analysis.\n';
+        responseMessage += `\n❌ Coingecko API might be on cooldown. Could not determine start date or initial investment.\n`; // Updated message
     }
 
   } catch (error) {
     console.error("Error in getFormattedPositionData:", error);
-    responseMessage = `An error occurred while fetching liquidity positions: ${error.message}. Please try again later.`;
+    responseMessage = `An error occurred while fetching liquidity positions: ${escapeMarkdown(error.message)}. Please try again later.`; // Escaped error message
   }
   return responseMessage;
 }
