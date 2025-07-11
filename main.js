@@ -17,11 +17,10 @@ const managerAddress = "0x03a520b32c04bf3beef7beb72e919cf822ed34f1";
 const poolAddress = "0xd0b53D9277642d899DF5C87A3966A349A798F224";
 const myAddress = "0x2FD24cC510b7a40b176B05A5Bb628d024e3B6886";
 
-// --- ABIs (FIXED: positions function signature) ---
+// --- ABIs ---
 const managerAbi = [
   "function balanceOf(address owner) view returns (uint256)",
   "function tokenOfOwnerByIndex(address owner, uint256 index) view returns (uint256)",
-  // CORRECTED ABI for positions function signature. This is the exact return type expected.
   "function positions(uint256 tokenId) view returns (uint96 nonce, address operator, address token0, address token1, uint24 fee, int24 tickLower, int24 tickUpper, uint128 liquidity, uint256 feeGrowthInside0LastX128, uint256 feeGrowthInside1LastX128, uint128 tokensOwed0, uint128 tokensOwed1)",
   "event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)",
   "function collect(tuple(uint256 tokenId, address recipient, uint128 amount0Max, uint128 amount1Max)) external returns (uint256 amount0, uint256 amount1)"
@@ -41,9 +40,9 @@ const erc20Abi = [
 const UINT128_MAX = "340282366920938463463374607431768211455";
 const { formatUnits } = ethers;
 
-// --- Utility Functions (All functions defined here at the top level) ---
+// --- Utility Functions ---
 
-// Helper to escape markdown characters for Telegram messages (Ensured top-level scope)
+// Helper to escape markdown characters for Telegram messages
 function escapeMarkdown(text) {
     if (typeof text !== 'string') return ''; // Handle non-string inputs
     return text.replace(/[_*[\]()~`>#+-=|{}.!]/g, '\\$&');
@@ -62,8 +61,8 @@ function tickToSqrtPriceX96(tick) {
 function getAmountsFromLiquidity(liquidity, sqrtPriceX96, sqrtLowerX96, sqrtUpperX96) {
   liquidity = BigInt(liquidity);
   sqrtPriceX96 = BigInt(sqrtPriceX96);
-  sqrtLowerX96 = BigInt(sqrtLowerX96 || 0n);
-  sqrtUpperX96 = BigInt(sqrtUpperX96 || 0n);
+  sqrtLowerX96 = BigInt(sqrtLowerX96 || 0n); 
+  sqrtUpperX96 = BigInt(sqrtUpperX96 || 0n); 
 
   let amount0 = 0n;
   let amount1 = 0n;
@@ -280,7 +279,8 @@ async function getFormattedPositionData(walletAddress) {
     let totalFeeUSD = 0;
     let startPrincipalUSD = null; // Overall portfolio initial investment
     let startDate = null; // Overall portfolio oldest position start date
-    let lastPortfolioValue = 0;
+    let totalPortfolioPrincipalUSD = 0; // NEW: Accumulates principal value for ALL positions, excluding fees
+    let currentTotalPortfolioValue = 0; // Accumulates total value of all positions including fees
 
     for (let i = 0n; i < balance; i++) {
       responseMessage += `\n--- *Position #${i.toString()}* ---\n`;
@@ -385,6 +385,8 @@ async function getFormattedPositionData(walletAddress) {
       }
 
       const principalUSD = amtWETH * prices.WETH + amtUSDC * prices.USDC;
+      totalPortfolioPrincipalUSD += principalUSD; // Accumulate for overall sum excluding fees
+
       const ratio = getRatio(amtWETH * prices.WETH, amtUSDC * prices.USDC);
 
       responseMessage += `\n💧 *Current Position Holdings*\n`;
@@ -436,7 +438,7 @@ async function getFormattedPositionData(walletAddress) {
       responseMessage += `\n🏦 *Total Position Value (incl. fees): $${currentTotalValue.toFixed(2)}*\n`;
 
       totalFeeUSD += (feeUSD0 + feeUSD1);
-      lastPortfolioValue = currentTotalValue;
+      currentTotalPortfolioValue += currentTotalValue; // Accumulate total value of all positions including fees
     }
 
     // --- Overall Portfolio Performance Analysis Section ---
@@ -447,14 +449,14 @@ async function getFormattedPositionData(walletAddress) {
         const rewardsPerDay = rewardsPerHour * 24;
         const rewardsPerMonth = rewardsPerDay * 30.44;
         const rewardsPerYear = rewardsPerDay * 365.25;
-        const totalReturn = lastPortfolioValue - startPrincipalUSD;
+        const totalReturn = currentTotalPortfolioValue - startPrincipalUSD; // Total return is value_with_fees - initial_investment
         const totalReturnPercent = (totalReturn / startPrincipalUSD) * 100;
         const feesAPR = (rewardsPerYear / startPrincipalUSD) * 100;
 
         responseMessage += `\n=== *OVERALL PORTFOLIO PERFORMANCE* ===\n`;
         // Removed: Oldest Position and Analysis Period lines
         responseMessage += `💰 Initial Investment: $${startPrincipalUSD.toFixed(2)}\n`;
-        responseMessage += `💰 Current Value: $${lastPortfolioValue.toFixed(2)}\n`;
+        responseMessage += `💰 Current Value: $${totalPortfolioPrincipalUSD.toFixed(2)}\n`; // CORRECTED: Use totalPrincipalValueOverall
         responseMessage += `💰 Total Return: $${totalReturn.toFixed(2)} (${totalReturnPercent.toFixed(2)}%)\n`;
         
         responseMessage += `\n📊 *Fee Performance*\n`;
@@ -463,7 +465,7 @@ async function getFormattedPositionData(walletAddress) {
         responseMessage += `💎 Fees APR: ${feesAPR.toFixed(2)}%\n`;
 
         // Added: All time gains
-        const allTimeGains = totalReturn + totalFeeUSD;
+        const allTimeGains = totalReturn + totalFeeUSD; // Sum of price return and total fees earned
         responseMessage += `\n💲 All time gains: $${allTimeGains.toFixed(2)}\n`;
 
         responseMessage += `\n🎯 *Overall Performance*\n`;
