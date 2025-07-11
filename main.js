@@ -21,7 +21,7 @@ const myAddress = "0x2FD24cC510b7a40b176B05A5Bb628d024e3B6886";
 const managerAbi = [
   "function balanceOf(address owner) view returns (uint256)",
   "function tokenOfOwnerByIndex(address owner, uint256 index) view returns (uint256)",
-  "function positions(uint256 tokenId) view returns (uint96 nonce, address operator, address token0, address token1, uint24 fee, int24 tickLower, int24 tickUpper, uint128 liquidity, uint256 feeGrowthInside0LastX128, uint256 feeGrowthInside1LastX128, uint128 tokensOwed0, uint128 tokensOwed1)",
+  "function positions(uint96 nonce, address operator, address token0, address token1, uint24 fee, int24 tickLower, int24 tickUpper, uint128 liquidity, uint256 feeGrowthInside0LastX128, uint256 feeGrowthInside1LastX128, uint128 tokensOwed0, uint128 tokensOwed1)",
   "event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)",
   "function collect(tuple(uint256 tokenId, address recipient, uint128 amount0Max, uint128 amount1Max)) external returns (uint256 amount0, uint256 amount1)"
 ];
@@ -189,8 +189,22 @@ async function getBlockTimestamp(blockNumber) {
   return block.timestamp * 1000; // JS Date expects ms
 }
 
-// fetchHistoricalPrice using CoinGecko (historical prices)
+// MODIFIED: fetchHistoricalPrice to use CoinGecko and include a simple rate limit backoff/cooldown
+const historicalPriceCache = {}; // Simple in-memory cache
+let coingeckoHistoricalCooldownUntil = 0; // Timestamp (ms) until which CoinGecko historical API is on cooldown
+
 async function fetchHistoricalPrice(coinId, dateStr) {
+  const cacheKey = `${coinId}-${dateStr}`;
+  if (historicalPriceCache[cacheKey]) {
+    return historicalPriceCache[cacheKey];
+  }
+
+  // Check if CoinGecko historical API is on cooldown
+  if (Date.now() < coingeckoHistoricalCooldownUntil) {
+      console.warn(`CoinGecko Historical API still on cooldown. Skipping request for ${cacheKey}.`);
+      return 0; // Return 0 if on cooldown, to avoid hitting rate limit repeatedly
+  }
+
   try {
     const url = `https://api.coingecko.com/api/v3/coins/${coinId}/history?date=${dateStr}`;
     const res = await fetch(url);
@@ -199,9 +213,14 @@ async function fetchHistoricalPrice(coinId, dateStr) {
         console.error(`CoinGecko Historical API responded with status: ${res.status} ${res.statusText}`);
         const errorBody = await res.text();
         console.error(`CoinGecko Historical API error body: ${errorBody.substring(0, 200)}...`);
+        
+        // If 429, set cooldown and return 0
         if (res.status === 429) {
-            console.warn(`CoinGecko Historical API rate limit hit. Returning 0 for price and trying next time.`);
-            return 0; // Return 0 if rate limited for historical price
+            const retryAfter = res.headers.get('Retry-After'); // Get recommended retry time from header (seconds)
+            const cooldownDuration = (retryAfter ? parseInt(retryAfter) * 1000 : 60 * 1000); // Default 60 seconds if no header
+            coingeckoHistoricalCooldownUntil = Date.now() + cooldownDuration;
+            console.warn(`CoinGecko Historical API rate limit hit. Setting cooldown for ${cooldownDuration / 1000} seconds.`);
+            return 0; // Return 0 to allow other calculations to proceed
         }
         throw new Error(`CoinGecko Historical API failed to fetch price for ${coinId} on ${dateStr}: ${res.status}`);
     }
@@ -214,10 +233,12 @@ async function fetchHistoricalPrice(coinId, dateStr) {
     }
 
     const price = data.market_data.current_price.usd || 0;
+    historicalPriceCache[cacheKey] = price; // Cache the fetched price
     return price;
   } catch (error) {
     console.error(`Failed to get HISTORICAL USD price from CoinGecko for ${coinId} on ${dateStr}: ${error.message}`);
-    return 0; // Return 0 if any error occurs, to allow the overall function to proceed
+    // Return 0 if any error occurs, to allow the overall function to proceed
+    return 0; 
   }
 }
 
@@ -271,7 +292,7 @@ async function getFormattedPositionData(walletAddress) {
       responseMessage += `🔸 Pool: ${t0.symbol}/${t1.symbol}\n`;
 
       let currentPositionStartDate = null;
-      let currentPositionInitialPrincipalUSD = 0; // Initialize to 0 for this position
+      let currentPositionInitialPrincipalUSD = 0; 
       let positionHistoryAnalysisSucceeded = false;
 
       // Get mint event and analyze initial investment (uses CoinGecko for historical)
@@ -429,19 +450,19 @@ async function getFormattedPositionData(walletAddress) {
         const feesAPR = (rewardsPerYear / startPrincipalUSD) * 100;
 
         responseMessage += `\n=== *OVERALL PORTFOLIO PERFORMANCE* ===\n`;
-        responseMessage += `📅 Oldest Position: ${startDate.toISOString().replace('T', ' ').slice(0, 19)}\n`;
-        responseMessage += `📅 Analysis Period: ${formatElapsedDaysHours(elapsedMs)}\n`;
+        // Removed: Oldest Position and Analysis Period lines
         responseMessage += `💰 Initial Investment: $${startPrincipalUSD.toFixed(2)}\n`;
         responseMessage += `💰 Current Value: $${lastPortfolioValue.toFixed(2)}\n`;
         responseMessage += `💰 Total Return: $${totalReturn.toFixed(2)} (${totalReturnPercent.toFixed(2)}%)\n`;
         
         responseMessage += `\n📊 *Fee Performance*\n`;
         responseMessage += `💎 Total Fees Earned: $${totalFeeUSD.toFixed(2)}\n`;
-        responseMessage += `💎 Fees per hour: $${rewardsPerHour.toFixed(2)}\n`;
-        responseMessage += `💎 Fees per day: $${rewardsPerDay.toFixed(2)}\n`;
-        responseMessage += `💎 Fees per month: $${rewardsPerMonth.toFixed(2)}\n`;
-        responseMessage += `💎 Fees per year: $${rewardsPerYear.toFixed(2)}\n`;
+        // Removed: Fees per hour/day/month/year lines
         responseMessage += `💎 Fees APR: ${feesAPR.toFixed(2)}%\n`;
+
+        // Added: All time gains
+        const allTimeGains = totalReturn + totalFeeUSD;
+        responseMessage += `\n💲 All time gains: $${allTimeGains.toFixed(2)}\n`;
 
         responseMessage += `\n🎯 *Overall Performance*\n`;
         responseMessage += `📈 Total APR (incl. price changes): ${((totalReturn / startPrincipalUSD) * (365.25 / (elapsedMs / (1000 * 60 * 60 * 24))) * 100).toFixed(2)}%\n`;
@@ -476,7 +497,6 @@ app.post(`/bot${TELEGRAM_BOT_TOKEN}/webhook`, async (req, res) => {
     res.sendStatus(200);
 
     // Process the command asynchronously in the background.
-    // Ensure 'update' is passed correctly to the async function.
     processTelegramCommand(req.body).catch(error => { 
         console.error("Unhandled error in async Telegram command processing:", error);
     });
