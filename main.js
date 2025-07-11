@@ -40,8 +40,7 @@ const erc20Abi = [
 const UINT128_MAX = "340282366920938463463374607431768211455";
 const { formatUnits } = ethers;
 
-// --- Utility Functions (All functions defined here for global access) ---
-
+// --- Utility Functions ---
 function tickToSqrtPriceX96(tick) {
   const ratio = Math.pow(1.0001, Number(tick));
   const product = Math.sqrt(ratio) * (2 ** 96);
@@ -218,7 +217,7 @@ async function fetchHistoricalPrice(coinId, dateStr) {
     return price;
   } catch (error) {
     console.error(`Failed to get HISTORICAL USD price from CoinGecko for ${coinId} on ${dateStr}: ${error.message}`);
-    throw error; // Re-throw to propagate to position history analysis
+    return 0; // Return 0 if any error occurs, to allow the overall function to proceed
   }
 }
 
@@ -256,8 +255,8 @@ async function getFormattedPositionData(walletAddress) {
     }
 
     let totalFeeUSD = 0;
-    let startPrincipalUSD = null;
-    let startDate = null;
+    let startPrincipalUSD = null; // Overall portfolio initial investment
+    let startDate = null; // Overall portfolio oldest position start date
     let lastPortfolioValue = 0;
 
     for (let i = 0n; i < balance; i++) {
@@ -272,7 +271,7 @@ async function getFormattedPositionData(walletAddress) {
       responseMessage += `🔸 Pool: ${t0.symbol}/${t1.symbol}\n`;
 
       let currentPositionStartDate = null;
-      let currentPositionInitialPrincipalUSD = null; 
+      let currentPositionInitialPrincipalUSD = 0; // Initialize to 0 for this position
       let positionHistoryAnalysisSucceeded = false;
 
       // Get mint event and analyze initial investment (uses CoinGecko for historical)
@@ -281,41 +280,17 @@ async function getFormattedPositionData(walletAddress) {
         const startTimestampMs = await getBlockTimestamp(mintBlock);
         currentPositionStartDate = new Date(startTimestampMs);
         
-        // Only set overall startDate and startPrincipalUSD from the oldest position if not set yet, or update if this is older
+        // Update overall startDate if this position is older
         if (!startDate || currentPositionStartDate.getTime() < startDate.getTime()) {
             startDate = currentPositionStartDate;
-            const day = startDate.getDate().toString().padStart(2, '0');
-            const month = (startDate.getMonth() + 1).toString().padStart(2, '0');
-            const year = startDate.getFullYear();
-            const dateStr = `${day}-${month}-${year}`;
-            // Use CoinGecko for historical prices here
-            const histWETH = await fetchHistoricalPrice('ethereum', dateStr);
-            const histUSDC = await fetchHistoricalPrice('usd-coin', dateStr);
-
-            const [histAmt0, histAmt1] = getAmountsFromLiquidity(
-              pos.liquidity,
-              tickToSqrtPriceX96(Number(pos.tickLower)),
-              tickToSqrtPriceX96(Number(pos.tickLower)), 
-              tickToSqrtPriceX96(Number(pos.tickUpper)) 
-            );
-
-            let histWETHamt = 0, histUSDCamt = 0;
-            if (t0.symbol.toUpperCase() === "WETH") {
-              histWETHamt = parseFloat(formatUnits(histAmt0, t0.decimals));
-              histUSDCamt = parseFloat(formatUnits(histAmt1, t1.decimals));
-            } else {
-              histWETHamt = parseFloat(formatUnits(histAmt1, t1.decimals));
-              histUSDCamt = parseFloat(formatUnits(histAmt0, t0.decimals));
-            }
-            startPrincipalUSD = histWETHamt * histWETH + histUSDCamt * histUSDC;
         }
-        
-        // For *this specific position*, calculate its initial principal based on its mint date
-        // Use CoinGecko for historical prices here
+
+        // --- Calculate initial principal for THIS specific position ---
         const dayCurrent = currentPositionStartDate.getDate().toString().padStart(2, '0');
         const monthCurrent = (currentPositionStartDate.getMonth() + 1).toString().padStart(2, '0');
         const yearCurrent = currentPositionStartDate.getFullYear();
         const dateStrCurrent = `${dayCurrent}-${monthCurrent}-${yearCurrent}`;
+        
         const histWETHCurrent = await fetchHistoricalPrice('ethereum', dateStrCurrent);
         const histUSDCCurrent = await fetchHistoricalPrice('usd-coin', dateStrCurrent);
 
@@ -334,7 +309,18 @@ async function getFormattedPositionData(walletAddress) {
             histUSDCamtCurrent = parseFloat(formatUnits(histAmt0Current, t0.decimals));
         }
         currentPositionInitialPrincipalUSD = histWETHamtCurrent * histWETHCurrent + histUSDCamtCurrent * histUSDCCurrent;
-        positionHistoryAnalysisSucceeded = true;
+        
+        // Only mark success if actual prices were retrieved
+        if (currentPositionInitialPrincipalUSD > 0) {
+             positionHistoryAnalysisSucceeded = true;
+        }
+
+        // --- Update overall portfolio's initial investment based on oldest position ---
+        // This is where we ensure the overall 'startPrincipalUSD' (which is oldest) gets correctly set
+        // if this current position is the oldest one found so far, and its historical data was successful.
+        if (positionHistoryAnalysisSucceeded && (startPrincipalUSD === null || currentPositionStartDate.getTime() === startDate.getTime())) {
+            startPrincipalUSD = currentPositionInitialPrincipalUSD;
+        }
 
 
         responseMessage += `📅 Created: ${currentPositionStartDate.toISOString().replace('T', ' ').slice(0, 19)}\n`;
@@ -420,7 +406,27 @@ async function getFormattedPositionData(walletAddress) {
           responseMessage += `💎 Fees per year: $${rewardsPerYear.toFixed(2)}\n`;
           responseMessage += `💎 Fees APR: ${feesAPR.toFixed(2)}%\n`;
       } else {
-          responseMessage += `\n⚠️ Could not determine per-position fee performance (initial investment unknown or zero).\n`;
+          // If historical analysis failed for this position, use the overall 'startPrincipalUSD' (from oldest position) as fallback
+          // This ensures the per-position APR calculation attempts to use *some* initial investment
+          // if the specific position's historical price fetch failed.
+          if (startPrincipalUSD !== null && startPrincipalUSD > 0) {
+              const now = new Date();
+              const elapsedMs = now.getTime() - currentPositionStartDate.getTime(); // Use this position's start date
+              const rewardsPerHour = elapsedMs > 0 ? totalPositionFeesUSD / (elapsedMs / 1000 / 60 / 60) : 0;
+              const rewardsPerDay = rewardsPerHour * 24;
+              const rewardsPerMonth = rewardsPerDay * 30.44;
+              const rewardsPerYear = rewardsPerDay * 365.25;
+              const feesAPR = (rewardsPerYear / startPrincipalUSD) * 100; // Use overall startPrincipalUSD as fallback
+
+              responseMessage += `\n📊 *Fee Performance (This Position - using overall initial investment fallback)*\n`;
+              responseMessage += `💎 Fees per hour: $${rewardsPerHour.toFixed(2)}\n`;
+              responseMessage += `💎 Fees per day: $${rewardsPerDay.toFixed(2)}\n`;
+              responseMessage += `💎 Fees per month: $${rewardsPerMonth.toFixed(2)}\n`;
+              responseMessage += `💎 Fees per year: $${rewardsPerYear.toFixed(2)}\n`;
+              responseMessage += `💎 Fees APR: ${feesAPR.toFixed(2)}%\n`;
+          } else {
+            responseMessage += `\n⚠️ Could not determine per-position fee performance (initial investment unknown or zero).\n`;
+          }
       }
 
       const currentTotalValue = principalUSD + totalPositionFeesUSD;
@@ -431,7 +437,7 @@ async function getFormattedPositionData(walletAddress) {
     }
 
     // --- Overall Portfolio Performance Analysis Section ---
-    if (startDate && startPrincipalUSD !== null) {
+    if (startDate && startPrincipalUSD !== null) { // This startPrincipalUSD is from the oldest position
         const now = new Date();
         const elapsedMs = now.getTime() - startDate.getTime();
         const rewardsPerHour = elapsedMs > 0 ? totalFeeUSD / (elapsedMs / 1000 / 60 / 60) : 0;
@@ -491,11 +497,8 @@ app.post(`/bot${TELEGRAM_BOT_TOKEN}/webhook`, async (req, res) => {
 
     // Process the command asynchronously in the background.
     // Ensure 'update' is passed correctly to the async function.
-    processTelegramCommand(req.body).catch(error => { // Pass req.body as 'update'
+    processTelegramCommand(req.body).catch(error => { 
         console.error("Unhandled error in async Telegram command processing:", error);
-        // Optionally, send a generic error message to the user here if processing fails
-        // after the initial 200 OK was sent.
-        // E.g., sendMessage(update.message.chat.id, "Sorry, a background error occurred. Please try again later.").catch(e => console.error("Failed to send async error msg:", e));
     });
 });
 
