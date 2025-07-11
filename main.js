@@ -17,11 +17,12 @@ const managerAddress = "0x03a520b32c04bf3beef7beb72e919cf822ed34f1";
 const poolAddress = "0xd0b53D9277642d899DF5C87A3966A349A798F224";
 const myAddress = "0x2FD24cC510b7a40b176B05A5Bb628d024e3B6886";
 
-// --- ABIs ---
+// --- ABIs (FIXED: positions function signature) ---
 const managerAbi = [
   "function balanceOf(address owner) view returns (uint256)",
   "function tokenOfOwnerByIndex(address owner, uint256 index) view returns (uint256)",
-  "function positions(uint96 nonce, address operator, address token0, address token1, uint24 fee, int24 tickLower, int24 tickUpper, uint128 liquidity, uint256 feeGrowthInside0LastX128, uint256 feeGrowthInside1LastX128, uint128 tokensOwed0, uint128 tokensOwed1)",
+  // CORRECTED: 'positions' function signature should take uint256 tokenId as argument
+  "function positions(uint256 tokenId) view returns (uint96 nonce, address operator, address token0, address token1, uint24 fee, int24 tickLower, int24 tickUpper, uint128 liquidity, uint256 feeGrowthInside0LastX128, uint256 feeGrowthInside1LastX128, uint128 tokensOwed0, uint128 tokensOwed1)",
   "event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)",
   "function collect(tuple(uint256 tokenId, address recipient, uint128 amount0Max, uint128 amount1Max)) external returns (uint256 amount0, uint256 amount1)"
 ];
@@ -41,6 +42,13 @@ const UINT128_MAX = "340282366920938463463374607431768211455";
 const { formatUnits } = ethers;
 
 // --- Utility Functions ---
+
+// Helper to escape markdown characters for Telegram messages
+function escapeMarkdown(text) {
+    if (!text || typeof text !== 'string') return '';
+    return text.replace(/[_*[\]()~`>#+-=|{}.!]/g, '\\$&');
+}
+
 function tickToSqrtPriceX96(tick) {
   const ratio = Math.pow(1.0001, Number(tick));
   const product = Math.sqrt(ratio) * (2 ** 96);
@@ -270,8 +278,8 @@ async function getFormattedPositionData(walletAddress) {
     }
 
     let totalFeeUSD = 0;
-    let startPrincipalUSD = null; 
-    let startDate = null; 
+    let startPrincipalUSD = null; // Overall portfolio initial investment
+    let startDate = null; // Overall portfolio oldest position start date
     let lastPortfolioValue = 0;
 
     for (let i = 0n; i < balance; i++) {
