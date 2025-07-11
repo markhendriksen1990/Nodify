@@ -41,7 +41,6 @@ const UINT128_MAX = "340282366920938463463374607431768211455";
 const { formatUnits } = ethers;
 
 // --- Utility Functions ---
-// Ensure all utility functions are defined at this top level for global access
 function tickToSqrtPriceX96(tick) {
   const ratio = Math.pow(1.0001, Number(tick));
   const product = Math.sqrt(ratio) * (2 ** 96);
@@ -481,12 +480,9 @@ app.post(`/bot${TELEGRAM_BOT_TOKEN}/webhook`, async (req, res) => {
     res.sendStatus(200);
 
     // Process the command asynchronously in the background.
-    // This prevents Telegram from timing out if getFormattedPositionData takes a long time.
-    processTelegramCommand(update).catch(error => {
+    // Ensure 'update' is passed correctly to the async function.
+    processTelegramCommand(req.body).catch(error => { // Pass req.body as 'update'
         console.error("Unhandled error in async Telegram command processing:", error);
-        // Optionally, send a generic error message to the user here if processing fails
-        // after the initial 200 OK was sent.
-        // E.g., sendMessage(update.message.chat.id, "Sorry, a background error occurred. Please try again later.").catch(e => console.error("Failed to send async error msg:", e));
     });
 });
 
