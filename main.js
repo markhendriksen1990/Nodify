@@ -41,6 +41,7 @@ const UINT128_MAX = "340282366920938463463374607431768211455";
 const { formatUnits } = ethers;
 
 // --- Utility Functions ---
+// Ensure all utility functions are defined at this top level for global access
 function tickToSqrtPriceX96(tick) {
   const ratio = Math.pow(1.0001, Number(tick));
   const product = Math.sqrt(ratio) * (2 ** 96);
@@ -177,6 +178,12 @@ async function getMintEventBlock(manager, tokenId, provider, ownerAddress) {
     fromBlock = toBlock - 49999; // Retaining 49999 as requested
   }
   throw new Error("Mint event not found for tokenId"); // Original error message
+}
+
+// RESTORED: getBlockTimestamp from your provided working version
+async function getBlockTimestamp(blockNumber) {
+  const block = await provider.getBlock(blockNumber);
+  return block.timestamp * 1000; // JS Date expects ms
 }
 
 // MODIFIED: fetchHistoricalPrice to use CoinGecko (historical prices)
@@ -469,9 +476,6 @@ app.post(`/bot${TELEGRAM_BOT_TOKEN}/webhook`, async (req, res) => {
         console.warn('Unauthorized webhook access attempt! Invalid or missing secret token.');
         return res.status(403).send('Forbidden: Invalid secret token');
     }
-
-    const update = req.body;
-    console.log('Received Telegram Update:', JSON.stringify(update, null, 2));
 
     // IMPORTANT: Always respond with 200 OK immediately to Telegram to acknowledge receipt
     res.sendStatus(200);
