@@ -81,7 +81,7 @@ async function getTokenMeta(addr) {
   }
 }
 
-// MODIFIED: getUsdPrices to use CoinLore (current prices)
+// getUsdPrices using CoinLore (current prices)
 async function getUsdPrices() {
   try {
     const res = await fetch("https://api.coinlore.net/api/tickers/"); // CoinLore API for tickers
@@ -155,38 +155,43 @@ function formatElapsedDaysHours(ms) {
   return `${days} days, ${hours} hours`;
 }
 
-// RESTORED: getMintEventBlock to its specific previous working state (49999 block query window)
+// REVISED: getMintEventBlock to use a smaller RPC_QUERY_WINDOW to avoid "invalid block range params"
 async function getMintEventBlock(manager, tokenId, provider, ownerAddress) {
   const latestBlock = await provider.getBlockNumber();
   const zeroAddress = "0x0000000000000000000000000000000000000000";
-  let fromBlock = latestBlock - 49999; // Retaining 49999 as requested
+  const MAX_BLOCK_SEARCH_DEPTH = 500000; // Overall search limit (roughly 2-3 months on Base)
+  const RPC_QUERY_WINDOW = 4999;       // Reduced RPC query window to avoid "invalid block range params"
+
+  let fromBlock = latestBlock - RPC_QUERY_WINDOW;
   let toBlock = latestBlock;
   ownerAddress = ownerAddress.toLowerCase();
 
-  while (toBlock >= 0) { // Retaining no explicit MAX_BLOCK_SEARCH_DEPTH limit as in your provided version
-    if (fromBlock < 0) fromBlock = 0;
+  while (toBlock >= 0 && (latestBlock - fromBlock) < MAX_BLOCK_SEARCH_DEPTH) { 
+    if (fromBlock < 0) fromBlock = 0; 
     const filter = manager.filters.Transfer(zeroAddress, null, tokenId);
     try {
       const events = await manager.queryFilter(filter, fromBlock, toBlock);
       const mint = events.find(e => e.args && e.args.to.toLowerCase() === ownerAddress);
-      if (mint) return mint.blockNumber;
+      if (mint) return mint.blockNumber; 
     } catch (e) {
-      console.warn(`Error querying block range ${fromBlock}-${toBlock}: ${e.message}. Ignoring and reducing window.`); // Added console.warn for visibility
+      console.warn(`Error querying block range ${fromBlock}-${toBlock}: ${e.message}. Attempting next window.`);
     }
     toBlock = fromBlock - 1;
-    fromBlock = toBlock - 49999; // Retaining 49999 as requested
+    fromBlock = toBlock - RPC_QUERY_WINDOW; // Use the smaller window
   }
-  throw new Error("Mint event not found for tokenId"); // Original error message
+  throw new Error(`Mint event not found for tokenId within the last ${MAX_BLOCK_SEARCH_DEPTH} blocks.`);
 }
 
-// RESTORED: getBlockTimestamp from your provided working version
-async function getBlockTimestamp(blockNumber) {
-  const block = await provider.getBlock(blockNumber);
-  return block.timestamp * 1000; // JS Date expects ms
-}
+// MODIFIED: fetchHistoricalPrice to use CoinGecko and include caching
+const historicalPriceCache = {}; // Simple in-memory cache
 
-// MODIFIED: fetchHistoricalPrice to use CoinGecko (historical prices)
 async function fetchHistoricalPrice(coinId, dateStr) {
+  const cacheKey = `${coinId}-${dateStr}`;
+  if (historicalPriceCache[cacheKey]) {
+    // console.log(`DEBUG: Using cached historical price for ${cacheKey}`);
+    return historicalPriceCache[cacheKey];
+  }
+
   try {
     const url = `https://api.coingecko.com/api/v3/coins/${coinId}/history?date=${dateStr}`;
     const res = await fetch(url);
@@ -195,6 +200,11 @@ async function fetchHistoricalPrice(coinId, dateStr) {
         console.error(`CoinGecko Historical API responded with status: ${res.status} ${res.statusText}`);
         const errorBody = await res.text();
         console.error(`CoinGecko Historical API error body: ${errorBody.substring(0, 200)}...`);
+        // If 429, don't rethrow immediately, let fallback handle it in getFormattedPositionData
+        if (res.status === 429) {
+            console.warn(`CoinGecko Historical API rate limit hit. Returning 0 for price and trying next time.`);
+            return 0; // Return 0 if rate limited to allow other calculations to proceed
+        }
         throw new Error(`CoinGecko Historical API failed to fetch price for ${coinId} on ${dateStr}: ${res.status}`);
     }
 
@@ -205,7 +215,9 @@ async function fetchHistoricalPrice(coinId, dateStr) {
         throw new Error(`CoinGecko Historical API returned incomplete data for ${coinId} on ${dateStr}.`);
     }
 
-    return data.market_data.current_price.usd || 0;
+    const price = data.market_data.current_price.usd || 0;
+    historicalPriceCache[cacheKey] = price; // Cache the fetched price
+    return price;
   } catch (error) {
     console.error(`Failed to get HISTORICAL USD price from CoinGecko for ${coinId} on ${dateStr}: ${error.message}`);
     throw error; // Re-throw to propagate to position history analysis
@@ -483,6 +495,9 @@ app.post(`/bot${TELEGRAM_BOT_TOKEN}/webhook`, async (req, res) => {
     // Ensure 'update' is passed correctly to the async function.
     processTelegramCommand(req.body).catch(error => { // Pass req.body as 'update'
         console.error("Unhandled error in async Telegram command processing:", error);
+        // Optionally, send a generic error message to the user here if processing fails
+        // after the initial 200 OK was sent.
+        // E.g., sendMessage(update.message.chat.id, "Sorry, a background error occurred. Please try again later.").catch(e => console.error("Failed to send async error msg:", e));
     });
 });
 
