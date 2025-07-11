@@ -17,13 +17,50 @@ const managerAddress = "0x03a520b32c04bf3beef7beb72e919cf822ed34f1";
 const poolAddress = "0xd0b53D9277642d899DF5C87A3966A349A798F224";
 const myAddress = "0x2FD24cC510b7a40b176B05A5Bb628d024e3B6886";
 
-// --- ABIs ---
+// --- ABIs (FIXED positions and collect fragments for ethers.js strictness) ---
 const managerAbi = [
   "function balanceOf(address owner) view returns (uint256)",
   "function tokenOfOwnerByIndex(address owner, uint256 index) view returns (uint256)",
-  "function positions(uint96 nonce, address operator, address token0, address token1, uint24 fee, int24 tickLower, int24 tickUpper, uint128 liquidity, uint256 feeGrowthInside0LastX128, uint256 feeGrowthInside1LastX128, uint128 tokensOwed0, uint128 tokensOwed1)",
+  // Explicitly define the positions function with its exact tuple return structure for ethers.js v6+
+  {
+    "inputs": [{"internalType": "uint256", "name": "tokenId", "type": "uint256"}],
+    "name": "positions",
+    "outputs": [
+      {"internalType": "uint96", "name": "nonce", "type": "uint96"},
+      {"internalType": "address", "name": "operator", "type": "address"},
+      {"internalType": "address", "name": "token0", "type": "address"},
+      {"internalType": "address", "name": "token1", "type": "address"},
+      {"internalType": "uint24", "name": "fee", "type": "uint24"},
+      {"internalType": "int24", "name": "tickLower", "type": "int24"},
+      {"internalType": "int24", "name": "tickUpper", "type": "int24"},
+      {"internalType": "uint128", "name": "liquidity", "type": "uint128"},
+      {"internalType": "uint256", "name": "feeGrowthInside0LastX128", "type": "uint256"},
+      {"internalType": "uint256", "name": "feeGrowthInside1LastX128", "type": "uint256"},
+      {"internalType": "uint128", "name": "tokensOwed0", "type": "uint128"},
+      {"internalType": "uint128", "name": "tokensOwed1", "type": "uint128"}
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
   "event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)",
-  "function collect(tuple(uint256 tokenId, address recipient, uint128 amount0Max, uint128 amount1Max)) external returns (uint256 amount0, uint256 amount1)"
+  // Explicitly define collect function for robustness too
+  {
+    "inputs": [
+      {"components": [
+        {"internalType": "uint256", "name": "tokenId", "type": "uint256"},
+        {"internalType": "address", "name": "recipient", "type": "address"},
+        {"internalType": "uint128", "name": "amount0Max", "type": "uint128"},
+        {"internalType": "uint128", "name": "amount1Max", "type": "uint128"}
+      ], "internalType": "struct INonfungiblePositionManager.CollectParams", "name": "params", "type": "tuple"}
+    ],
+    "name": "collect",
+    "outputs": [
+      {"internalType": "uint256", "name": "amount0", "type": "uint256"},
+      {"internalType": "uint256", "name": "amount1", "type": "uint256"}
+    ],
+    "stateMutability": "nonpayable", // collect is not view, it changes state
+    "type": "function"
+  }
 ];
 
 const poolAbi = [
@@ -159,15 +196,13 @@ function formatElapsedDaysHours(ms) {
 async function getMintEventBlock(manager, tokenId, provider, ownerAddress) {
   const latestBlock = await provider.getBlockNumber();
   const zeroAddress = "0x0000000000000000000000000000000000000000";
-  // As requested: 49999 block window per RPC call.
-  // Note: This range might still cause "invalid block range params" errors from some RPC providers.
   const RPC_QUERY_WINDOW = 49999;       
 
   let fromBlock = latestBlock - RPC_QUERY_WINDOW;
   let toBlock = latestBlock;
   ownerAddress = ownerAddress.toLowerCase();
 
-  while (toBlock >= 0) { // Loop without overall MAX_BLOCK_SEARCH_DEPTH limit
+  while (toBlock >= 0) { 
     if (fromBlock < 0) fromBlock = 0;
     const filter = manager.filters.Transfer(zeroAddress, null, tokenId);
     try {
@@ -189,7 +224,7 @@ async function getBlockTimestamp(blockNumber) {
   return block.timestamp * 1000; // JS Date expects ms
 }
 
-// MODIFIED: fetchHistoricalPrice to use CoinGecko and include a simple rate limit backoff/cooldown
+// fetchHistoricalPrice using CoinGecko and include a simple rate limit backoff/cooldown
 const historicalPriceCache = {}; // Simple in-memory cache
 let coingeckoHistoricalCooldownUntil = 0; // Timestamp (ms) until which CoinGecko historical API is on cooldown
 
@@ -214,13 +249,12 @@ async function fetchHistoricalPrice(coinId, dateStr) {
         const errorBody = await res.text();
         console.error(`CoinGecko Historical API error body: ${errorBody.substring(0, 200)}...`);
         
-        // If 429, set cooldown and return 0
         if (res.status === 429) {
-            const retryAfter = res.headers.get('Retry-After'); // Get recommended retry time from header (seconds)
-            const cooldownDuration = (retryAfter ? parseInt(retryAfter) * 1000 : 60 * 1000); // Default 60 seconds if no header
+            const retryAfter = res.headers.get('Retry-After');
+            const cooldownDuration = (retryAfter ? parseInt(retryAfter) * 1000 : 60 * 1000); 
             coingeckoHistoricalCooldownUntil = Date.now() + cooldownDuration;
             console.warn(`CoinGecko Historical API rate limit hit. Setting cooldown for ${cooldownDuration / 1000} seconds.`);
-            return 0; // Return 0 to allow other calculations to proceed
+            return 0; 
         }
         throw new Error(`CoinGecko Historical API failed to fetch price for ${coinId} on ${dateStr}: ${res.status}`);
     }
@@ -237,7 +271,6 @@ async function fetchHistoricalPrice(coinId, dateStr) {
     return price;
   } catch (error) {
     console.error(`Failed to get HISTORICAL USD price from CoinGecko for ${coinId} on ${dateStr}: ${error.message}`);
-    // Return 0 if any error occurs, to allow the overall function to proceed
     return 0; 
   }
 }
@@ -427,148 +460,17 @@ async function getFormattedPositionData(walletAddress) {
           responseMessage += `💎 Fees per year: $${rewardsPerYear.toFixed(2)}\n`;
           responseMessage += `💎 Fees APR: ${feesAPR.toFixed(2)}%\n`;
       } else {
-          responseMessage += `\n⚠️ Could not determine per-position fee performance (initial investment unknown or zero).\n`;
-      }
+          // Fallback logic from previous versions, now using startPrincipalUSD if available
+          if (startPrincipalUSD !== null && startPrincipalUSD > 0 && currentPositionStartDate) { // Ensure currentPositionStartDate is also available
+              const now = new Date();
+              const elapsedMs = now.getTime() - currentPositionStartDate.getTime();
+              const rewardsPerHour = elapsedMs > 0 ? totalPositionFeesUSD / (elapsedMs / 1000 / 60 / 60) : 0;
+              const rewardsPerDay = rewardsPerHour * 24;
+              const rewardsPerMonth = rewardsPerDay * 30.44;
+              const rewardsPerYear = rewardsPerDay * 365.25;
+              const feesAPR = (rewardsPerYear / startPrincipalUSD) * 100; // Use overall startPrincipalUSD as fallback
 
-      const currentTotalValue = principalUSD + totalPositionFeesUSD;
-      responseMessage += `\n🏦 *Total Position Value (incl. fees): $${currentTotalValue.toFixed(2)}*\n`;
-
-      totalFeeUSD += (feeUSD0 + feeUSD1);
-      lastPortfolioValue = currentTotalValue;
-    }
-
-    // --- Overall Portfolio Performance Analysis Section ---
-    if (startDate && startPrincipalUSD !== null) {
-        const now = new Date();
-        const elapsedMs = now.getTime() - startDate.getTime();
-        const rewardsPerHour = elapsedMs > 0 ? totalFeeUSD / (elapsedMs / 1000 / 60 / 60) : 0;
-        const rewardsPerDay = rewardsPerHour * 24;
-        const rewardsPerMonth = rewardsPerDay * 30.44;
-        const rewardsPerYear = rewardsPerDay * 365.25;
-        const totalReturn = lastPortfolioValue - startPrincipalUSD;
-        const totalReturnPercent = (totalReturn / startPrincipalUSD) * 100;
-        const feesAPR = (rewardsPerYear / startPrincipalUSD) * 100;
-
-        responseMessage += `\n=== *OVERALL PORTFOLIO PERFORMANCE* ===\n`;
-        // Removed: Oldest Position and Analysis Period lines
-        responseMessage += `💰 Initial Investment: $${startPrincipalUSD.toFixed(2)}\n`;
-        responseMessage += `💰 Current Value: $${lastPortfolioValue.toFixed(2)}\n`;
-        responseMessage += `💰 Total Return: $${totalReturn.toFixed(2)} (${totalReturnPercent.toFixed(2)}%)\n`;
-        
-        responseMessage += `\n📊 *Fee Performance*\n`;
-        responseMessage += `💎 Total Fees Earned: $${totalFeeUSD.toFixed(2)}\n`;
-        // Removed: Fees per hour/day/month/year lines
-        responseMessage += `💎 Fees APR: ${feesAPR.toFixed(2)}%\n`;
-
-        // Added: All time gains
-        const allTimeGains = totalReturn + totalFeeUSD;
-        responseMessage += `\n💲 All time gains: $${allTimeGains.toFixed(2)}\n`;
-
-        responseMessage += `\n🎯 *Overall Performance*\n`;
-        responseMessage += `📈 Total APR (incl. price changes): ${((totalReturn / startPrincipalUSD) * (365.25 / (elapsedMs / (1000 * 60 * 60 * 24))) * 100).toFixed(2)}%\n`;
-    } else {
-        responseMessage += '\n❌ Could not determine start date or start principal USD value for overall performance analysis.\n';
-    }
-
-  } catch (error) {
-    console.error("Error in getFormattedPositionData:", error);
-    responseMessage = `An error occurred while fetching liquidity positions: ${error.message}. Please try again later.`;
-  }
-  return responseMessage;
-}
-
-// --- Express App Setup for Webhook ---
-const app = express();
-const PORT = process.env.PORT || 3000;
-
-// Use body-parser to parse JSON payloads from Telegram
-app.use(bodyParser.json());
-
-// Telegram Webhook endpoint
-app.post(`/bot${TELEGRAM_BOT_TOKEN}/webhook`, async (req, res) => {
-    // Validate Telegram's webhook secret
-    const telegramSecret = req.get('X-Telegram-Bot-Api-Secret-Token');
-    if (!WEBHOOK_SECRET || telegramSecret !== WEBHOOK_SECRET) {
-        console.warn('Unauthorized webhook access attempt! Invalid or missing secret token.');
-        return res.status(403).send('Forbidden: Invalid secret token');
-    }
-
-    // IMPORTANT: Always respond with 200 OK immediately to Telegram to acknowledge receipt
-    res.sendStatus(200);
-
-    // Process the command asynchronously in the background.
-    processTelegramCommand(req.body).catch(error => { 
-        console.error("Unhandled error in async Telegram command processing:", error);
-    });
-});
-
-// Asynchronous function to process Telegram commands and send responses
-async function processTelegramCommand(update) {
-    if (update.message) {
-        const messageText = update.message.text;
-        const chatId = update.message.chat.id;
-
-        if (messageText && messageText.startsWith('/positions')) {
-            try {
-                await sendChatAction(chatId, 'typing');
-                const positionData = await getFormattedPositionData(myAddress);
-                await sendMessage(chatId, positionData);
-            } catch (error) {
-                console.error("Error processing /positions command asynchronously:", error);
-                await sendMessage(chatId, "Sorry, I encountered an internal error while fetching positions. Please try again later.");
-            }
-        } else if (messageText && messageText.startsWith('/start')) {
-            await sendMessage(chatId, "Welcome! I can provide you with information about your Uniswap V3 liquidity positions. Type /positions to get a summary.");
-        } else {
-            await sendMessage(chatId, "I received your message, but I only understand the /positions command. If you want to see your positions, type /positions or select it from the menu.");
-        }
-    }
-}
-
-
-// Function to send messages back to Telegram
-async function sendMessage(chatId, text) {
-    const telegramApiUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
-    try {
-        const response = await fetch(telegramApiUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                chat_id: chatId,
-                text: text,
-                parse_mode: 'Markdown',
-                disable_web_page_preview: true
-            })
-        });
-        const data = await response.json();
-        if (!response.ok) {
-            console.error('Failed to send message:', data);
-        }
-    } catch (error) {
-        console.error('Error sending message to Telegram:', error);
-    }
-}
-
-// Function to send chat actions (like 'typing')
-async function sendChatAction(chatId, action) {
-    const telegramApiUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendChatAction`;
-    try {
-        await fetch(telegramApiUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                chat_id: chatId,
-                action: action
-            })
-        });
-    } catch (error) {
-        console.error('Error sending chat action to Telegram:', error);
-    }
-}
-
-
-// Start the Express server
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-    console.log(`Telegram webhook URL: ${RENDER_WEBHOOK_URL}/bot${TELEGRAM_BOT_TOKEN}/webhook`);
-});
+              responseMessage += `\n📊 *Fee Performance (This Position - using overall initial investment fallback)*\n`;
+              responseMessage += `💎 Fees per hour: $${rewardsPerHour.toFixed(2)}\n`;
+              responseMessage += `💎 Fees per day: $${rewardsPerDay.toFixed(2)}\n`;
+              responseMessage += `💎 Fees per month: $${rewardsPerMonth.
