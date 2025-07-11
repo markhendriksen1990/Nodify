@@ -155,12 +155,13 @@ function formatElapsedDaysHours(ms) {
   return `${days} days, ${hours} hours`;
 }
 
-// REVISED: getMintEventBlock to use a smaller RPC_QUERY_WINDOW to avoid "invalid block range params"
+// MODIFIED: getMintEventBlock - Increased MAX_BLOCK_SEARCH_DEPTH
 async function getMintEventBlock(manager, tokenId, provider, ownerAddress) {
   const latestBlock = await provider.getBlockNumber();
   const zeroAddress = "0x0000000000000000000000000000000000000000";
-  const MAX_BLOCK_SEARCH_DEPTH = 500000; // Overall search limit (roughly 2-3 months on Base)
-  const RPC_QUERY_WINDOW = 4999;       // Reduced RPC query window to avoid "invalid block range params"
+  // Increased depth significantly to capture older mint events
+  const MAX_BLOCK_SEARCH_DEPTH = 5000000; // Increased to 5 million blocks (approx. 200 days on Base)
+  const RPC_QUERY_WINDOW = 49999;       // Retaining 49999 as requested (may still cause RPC errors)
 
   let fromBlock = latestBlock - RPC_QUERY_WINDOW;
   let toBlock = latestBlock;
@@ -177,21 +178,13 @@ async function getMintEventBlock(manager, tokenId, provider, ownerAddress) {
       console.warn(`Error querying block range ${fromBlock}-${toBlock}: ${e.message}. Attempting next window.`);
     }
     toBlock = fromBlock - 1;
-    fromBlock = toBlock - RPC_QUERY_WINDOW; // Use the smaller window
+    fromBlock = toBlock - RPC_QUERY_WINDOW; 
   }
   throw new Error(`Mint event not found for tokenId within the last ${MAX_BLOCK_SEARCH_DEPTH} blocks.`);
 }
 
-// MODIFIED: fetchHistoricalPrice to use CoinGecko and include caching
-const historicalPriceCache = {}; // Simple in-memory cache
-
+// fetchHistoricalPrice using CoinGecko (historical prices)
 async function fetchHistoricalPrice(coinId, dateStr) {
-  const cacheKey = `${coinId}-${dateStr}`;
-  if (historicalPriceCache[cacheKey]) {
-    // console.log(`DEBUG: Using cached historical price for ${cacheKey}`);
-    return historicalPriceCache[cacheKey];
-  }
-
   try {
     const url = `https://api.coingecko.com/api/v3/coins/${coinId}/history?date=${dateStr}`;
     const res = await fetch(url);
@@ -200,10 +193,10 @@ async function fetchHistoricalPrice(coinId, dateStr) {
         console.error(`CoinGecko Historical API responded with status: ${res.status} ${res.statusText}`);
         const errorBody = await res.text();
         console.error(`CoinGecko Historical API error body: ${errorBody.substring(0, 200)}...`);
-        // If 429, don't rethrow immediately, let fallback handle it in getFormattedPositionData
+        // If 429, handle gracefully without rethrowing to allow other calcs to proceed
         if (res.status === 429) {
             console.warn(`CoinGecko Historical API rate limit hit. Returning 0 for price and trying next time.`);
-            return 0; // Return 0 if rate limited to allow other calculations to proceed
+            return 0; // Return 0 if rate limited for historical price
         }
         throw new Error(`CoinGecko Historical API failed to fetch price for ${coinId} on ${dateStr}: ${res.status}`);
     }
@@ -216,11 +209,13 @@ async function fetchHistoricalPrice(coinId, dateStr) {
     }
 
     const price = data.market_data.current_price.usd || 0;
-    historicalPriceCache[cacheKey] = price; // Cache the fetched price
+    // No in-memory cache for historical prices here, as previous cache was problematic.
+    // If multiple calls for same historical date happen, it will re-query.
     return price;
   } catch (error) {
     console.error(`Failed to get HISTORICAL USD price from CoinGecko for ${coinId} on ${dateStr}: ${error.message}`);
-    throw error; // Re-throw to propagate to position history analysis
+    // If any error occurs here, historical price will be 0, leading to "Could not analyze position history"
+    return 0; 
   }
 }
 
