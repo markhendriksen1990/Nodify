@@ -167,7 +167,7 @@ async function getMintEventBlock(manager, tokenId, provider, ownerAddress) {
   let toBlock = latestBlock;
   ownerAddress = ownerAddress.toLowerCase();
 
-  while (toBlock >= 0) { // Loop without overall MAX_BLOCK_SEARCH_DEPTH as in your provided version
+  while (toBlock >= 0) { // Loop without overall MAX_BLOCK_SEARCH_DEPTH limit
     if (fromBlock < 0) fromBlock = 0;
     const filter = manager.filters.Transfer(zeroAddress, null, tokenId);
     try {
@@ -310,7 +310,7 @@ async function getFormattedPositionData(walletAddress) {
         }
         currentPositionInitialPrincipalUSD = histWETHamtCurrent * histWETHCurrent + histUSDCamtCurrent * histUSDCCurrent;
         
-        // Only mark success if actual prices were retrieved
+        // Only mark success if actual prices were retrieved (not 0 due to API error)
         if (currentPositionInitialPrincipalUSD > 0) {
              positionHistoryAnalysisSucceeded = true;
         }
@@ -406,27 +406,7 @@ async function getFormattedPositionData(walletAddress) {
           responseMessage += `💎 Fees per year: $${rewardsPerYear.toFixed(2)}\n`;
           responseMessage += `💎 Fees APR: ${feesAPR.toFixed(2)}%\n`;
       } else {
-          // If historical analysis failed for this position, use the overall 'startPrincipalUSD' (from oldest position) as fallback
-          // This ensures the per-position APR calculation attempts to use *some* initial investment
-          // if the specific position's historical price fetch failed.
-          if (startPrincipalUSD !== null && startPrincipalUSD > 0) {
-              const now = new Date();
-              const elapsedMs = now.getTime() - currentPositionStartDate.getTime(); // Use this position's start date
-              const rewardsPerHour = elapsedMs > 0 ? totalPositionFeesUSD / (elapsedMs / 1000 / 60 / 60) : 0;
-              const rewardsPerDay = rewardsPerHour * 24;
-              const rewardsPerMonth = rewardsPerDay * 30.44;
-              const rewardsPerYear = rewardsPerDay * 365.25;
-              const feesAPR = (rewardsPerYear / startPrincipalUSD) * 100; // Use overall startPrincipalUSD as fallback
-
-              responseMessage += `\n📊 *Fee Performance (This Position - using overall initial investment fallback)*\n`;
-              responseMessage += `💎 Fees per hour: $${rewardsPerHour.toFixed(2)}\n`;
-              responseMessage += `💎 Fees per day: $${rewardsPerDay.toFixed(2)}\n`;
-              responseMessage += `💎 Fees per month: $${rewardsPerMonth.toFixed(2)}\n`;
-              responseMessage += `💎 Fees per year: $${rewardsPerYear.toFixed(2)}\n`;
-              responseMessage += `💎 Fees APR: ${feesAPR.toFixed(2)}%\n`;
-          } else {
-            responseMessage += `\n⚠️ Could not determine per-position fee performance (initial investment unknown or zero).\n`;
-          }
+          responseMessage += `\n⚠️ Could not determine per-position fee performance (initial investment unknown or zero).\n`;
       }
 
       const currentTotalValue = principalUSD + totalPositionFeesUSD;
@@ -437,7 +417,7 @@ async function getFormattedPositionData(walletAddress) {
     }
 
     // --- Overall Portfolio Performance Analysis Section ---
-    if (startDate && startPrincipalUSD !== null) { // This startPrincipalUSD is from the oldest position
+    if (startDate && startPrincipalUSD !== null) {
         const now = new Date();
         const elapsedMs = now.getTime() - startDate.getTime();
         const rewardsPerHour = elapsedMs > 0 ? totalFeeUSD / (elapsedMs / 1000 / 60 / 60) : 0;
