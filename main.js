@@ -291,8 +291,8 @@ async function getFormattedPositionData(walletAddress) {
     }
 
     let totalFeeUSD = 0;
-    let startPrincipalUSD = null; 
-    let startDate = null; 
+    let startPrincipalUSD = null; // Overall portfolio initial investment
+    let startDate = null; // Overall portfolio oldest position start date
     let currentTotalPortfolioValue = 0; // Accumulates total value of all positions including fees
     let totalPortfolioPrincipalUSD = 0; // Accumulates principal value for ALL positions, excluding fees
 
@@ -361,7 +361,7 @@ async function getFormattedPositionData(walletAddress) {
 
 
         responseMessage += `📅 Created: ${currentPositionStartDate.toISOString().replace('T', ' ').slice(0, 19)}\n`;
-        responseMessage += `💰 Initial Est. Investment: $${currentPositionInitialPrincipalUSD.toFixed(2)}\n`; 
+        responseMessage += `💰 Initial Investment: $${currentPositionInitialPrincipalUSD.toFixed(2)}\n`; // Changed "Est. Investment" to "Investment"
       } catch (error) {
         responseMessage += `⚠️ Could not analyze position history: ${escapeMarkdown(error.message)}\n`; // Escaped error message
       }
@@ -372,9 +372,9 @@ async function getFormattedPositionData(walletAddress) {
       const currentPrice = tickToPricePerToken0(Number(nativeTick), Number(t0.decimals), Number(t1.decimals));
 
       responseMessage += `\n📊 *Price Information*\n`;
-      responseMessage += `🏷️ Tick Range: \`[${pos.tickLower}, ${pos.tickUpper}]\`\n`;
-      responseMessage += `🏷️ Price Range: $${lowerPrice.toFixed(2)} - $${upperPrice.toFixed(2)} ${t1.symbol}/${t0.symbol}\n`; // 2 decimals
-      responseMessage += `🌐 Current Tick: \`${nativeTick}\`\n`;
+      // Removed: responseMessage += `🏷️ Tick Range: \`[${pos.tickLower}, ${pos.tickUpper}]\`\n`;
+      responseMessage += `Range: $${lowerPrice.toFixed(2)} - $${upperPrice.toFixed(2)} ${t1.symbol}/${t0.symbol}\n`; // Changed "Price Range" to "Range"
+      // Removed: responseMessage += `🌐 Current Tick: \`${nativeTick}\`\n`;
       responseMessage += `🌐 Current Price: $${currentPrice.toFixed(2)} ${t1.symbol}/${t0.symbol}\n`; // 2 decimals
       
       const inRange = nativeTick >= pos.tickLower && nativeTick < pos.tickUpper;
@@ -451,6 +451,15 @@ async function getFormattedPositionData(walletAddress) {
       const currentTotalValue = principalUSD + totalPositionFeesUSD;
       responseMessage += `\n🏦 *Total Position Value (incl. fees): $${currentTotalValue.toFixed(2)}*\n`;
 
+      // NEW: Position Total return + Fees
+      // This calculates the return + fees for this specific position
+      const positionTotalReturn = principalUSD - currentPositionInitialPrincipalUSD; // Principal gain/loss for this position
+      const positionTotalGains = positionTotalReturn + totalPositionFeesUSD; // Total gain including fees for this position
+      if (positionHistoryAnalysisSucceeded && currentPositionInitialPrincipalUSD > 0) {
+          responseMessage += `💲 Position Total return + Fees: $${positionTotalGains.toFixed(2)}\n`;
+      }
+
+
       totalFeeUSD += (feeUSD0 + feeUSD1);
       currentTotalPortfolioValue += currentTotalValue; // Accumulate total value of all positions including fees
     }
@@ -464,7 +473,7 @@ async function getFormattedPositionData(walletAddress) {
         const rewardsPerMonth = rewardsPerDay * 30.44;
         const rewardsPerYear = rewardsPerDay * 365.25;
         
-        // Corrected Total Return: Principal-only change
+        // Corrected Total Return: Principal-only change across all positions
         const totalReturn = totalPortfolioPrincipalUSD - startPrincipalUSD; 
         const totalReturnPercent = (totalReturn / startPrincipalUSD) * 100;
         
@@ -473,7 +482,7 @@ async function getFormattedPositionData(walletAddress) {
         responseMessage += `\n=== *OVERALL PORTFOLIO PERFORMANCE* ===\n`;
         // Removed: Oldest Position and Analysis Period lines
         responseMessage += `💰 Initial Investment: $${startPrincipalUSD.toFixed(2)}\n`;
-        responseMessage += `💰 Current Value: $${totalPortfolioPrincipalUSD.toFixed(2)}\n`; // Use totalPortfolioPrincipalUSD
+        responseMessage += `💰 Current Value: $${totalPortfolioPrincipalUSD.toFixed(2)}\n`; 
         responseMessage += `💰 Total Return: $${totalReturn.toFixed(2)} (${totalReturnPercent.toFixed(2)}%)\n`;
         
         responseMessage += `\n📊 *Fee Performance*\n`;
@@ -483,12 +492,13 @@ async function getFormattedPositionData(walletAddress) {
 
         // Corrected All time gains: Principal return + Total Fees Earned
         const allTimeGains = totalReturn + totalFeeUSD; 
-        responseMessage += `\n💲 All time gains: $${allTimeGains.toFixed(2)}\n`;
+        responseMessage += `\n💲 All time Total return + Fees: $${allTimeGains.toFixed(2)}\n`; // Changed text
 
-        responseMessage += `\n🎯 *Overall Performance*\n`;
-        // totalReturn is now principal-only, so Total APR (incl. price changes) should use totalPortfolioValue (with fees)
-        const totalAPRInclPriceChanges = ((currentTotalPortfolioValue - startPrincipalUSD) / startPrincipalUSD) * (365.25 / (elapsedMs / (1000 * 60 * 60 * 24))) * 100;
-        responseMessage += `📈 Total APR (incl. price changes): ${totalAPRInclPriceChanges.toFixed(2)}%\n`;
+        // Removed: Overall Performance heading and Total APR (incl. price changes) line
+        // If you need the overall APR for the total value (principal + fees) again, re-add this explicitly.
+        // responseMessage += `\n🎯 *Overall Performance*\n`;
+        // const totalAPRInclPriceChanges = ((currentTotalPortfolioValue - startPrincipalUSD) / startPrincipalUSD) * (365.25 / (elapsedMs / (1000 * 60 * 60 * 24))) * 100;
+        // responseMessage += `📈 Total APR (incl. price changes): ${totalAPRInclPriceChanges.toFixed(2)}%\n`;
     } else {
         responseMessage += `\n❌ Coingecko API might be on cooldown. Could not determine start date or initial investment.\n`; 
     }
