@@ -1,31 +1,45 @@
+// --- VERY EARLY DEBUG LOG ---
+console.log('DEBUG: Script started. Attempting initial module imports and config setup.');
+
 // --- Import necessary modules ---
 const { ethers } = require("ethers");
 const express = require('express');
 const bodyParser = require('body-parser');
-const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
+const fetch = (...args) => {
+  // DEBUG: Log node-fetch import attempt
+  console.log('DEBUG: Attempting to import node-fetch dynamically.');
+  return import('node-fetch').then(({ default: fetch }) => {
+    console.log('DEBUG: node-fetch imported successfully.');
+    return fetch(...args);
+  }).catch(e => {
+    console.error(`FATAL ERROR: Failed to import node-fetch: ${e.message}`);
+    throw e; // Re-throw to propagate critical error
+  });
+};
 
 // --- Configuration from Environment Variables ---
+console.log('DEBUG: Loading environment variables.');
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const CHAT_ID = process.env.CHAT_ID;
 const RENDER_WEBHOOK_URL = process.env.RENDER_WEBHOOK_URL;
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
+console.log(`DEBUG: Env vars loaded. RENDER_WEBHOOK_URL: ${RENDER_WEBHOOK_URL ? RENDER_WEBHOOK_URL.substring(0, 30) + '...' : 'N/A'}`); // Log partially for security
 
 // --- Ethers.js Provider and Contract Addresses ---
+console.log('DEBUG: Setting up Ethers.js provider and contract addresses.');
 const provider = new ethers.JsonRpcProvider("https://base.publicnode.com");
+console.log('DEBUG: Ethers.js provider initialized.');
 
 const managerAddress = "0x03a520b32c04bf3beef7beb72e919cf822ed34f1";
-// Removed hardcoded poolAddress, it will be derived dynamically per NFT
-// const poolAddress = "0xd0b53D9277642d899DF5C87A3966A349A798F224"; 
 const myAddress = "0x2FD24cC510b7a40b176B05A5Bb628d024e3B6886";
-
-// Uniswap V3 Factory Address on Base (You can find this on Chainlist.org or Uniswap V3 docs)
-const factoryAddress = "0x33128a8fc17869b8dceb626f79ceefbeed336b3b"; // Uniswap V3 Factory on Base
+const factoryAddress = "0x33128a8fc17869b8dceb626f79ceefbeed336b3b"; 
+console.log('DEBUG: Contract addresses defined.');
 
 // --- ABIs ---
+console.log('DEBUG: Defining ABIs.');
 const managerAbi = [
   "function balanceOf(address owner) view returns (uint256)",
   "function tokenOfOwnerByIndex(address owner, uint256 index) view returns (uint256)",
-  // Corrected 'positions' function signature. This is the canonical signature.
   {
     "inputs": [
       { "internalType": "uint256", "name": "tokenId", "type": "uint256" }
@@ -58,7 +72,6 @@ const poolAbi = [
   "function token1() view returns (address)"
 ];
 
-// ABI for Uniswap V3 Factory to get pool address
 const factoryAbi = [
   "function getPool(address tokenA, address tokenB, uint24 fee) view returns (address pool)"
 ];
@@ -70,8 +83,9 @@ const erc20Abi = [
 
 const UINT128_MAX = "340282366920938463463374607431768211455";
 const { formatUnits } = ethers;
+console.log('DEBUG: ABIs and ethers utils defined.');
 
-// --- Utility Functions ---
+// --- Utility Functions (All functions defined at the top-level for global access) ---
 
 // Helper to escape markdown characters for Telegram messages
 function escapeMarkdown(text) {
@@ -316,7 +330,6 @@ async function getFormattedPositionData(walletAddress) {
     console.log('DEBUG: getUsdPrices (CoinLore) completed.');
 
     const manager = new ethers.Contract(managerAddress, managerAbi, provider);
-    // Instantiate Uniswap V3 Factory contract
     const factory = new ethers.Contract(factoryAddress, factoryAbi, provider);
 
     console.log(`DEBUG: Getting balanceOf ${walletAddress}`);
@@ -446,7 +459,9 @@ async function getFormattedPositionData(walletAddress) {
       const currentPrice = tickToPricePerToken0(Number(nativeTick), Number(t0.decimals), Number(t1.decimals));
 
       responseMessage += `\n*Price Information*\n`; // Removed icon
+      // Removed: responseMessage += `🏷️ Tick Range: \`[${pos.tickLower}, ${pos.tickUpper}]\`\n`;
       responseMessage += `🏷️ Range: $${lowerPrice.toFixed(2)} - $${upperPrice.toFixed(2)} ${t1.symbol}/${t0.symbol}\n`; // Changed "Price Range" to "Range" and added label icon
+      // Removed: responseMessage += `🌐 Current Tick: \`${nativeTick}\`\n`;
       responseMessage += `🏷️ Current Price: $${currentPrice.toFixed(2)} ${t1.symbol}/${t0.symbol}\n`; // 2 decimals and added label icon
       
       const inRange = nativeTick >= pos.tickLower && nativeTick < pos.tickUpper;
