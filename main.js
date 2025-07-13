@@ -110,31 +110,35 @@ function getAmountsFromLiquidity(liquidity, sqrtPriceX96, sqrtLowerX96, sqrtUppe
 }
 
 async function getTokenMeta(addr) {
+  console.log(`DEBUG: Fetching meta for token address: ${addr}`);
   try {
     const t = new ethers.Contract(addr, erc20Abi, provider);
     const [symbol, decimals] = await Promise.all([t.symbol(), t.decimals()]);
+    console.log(`DEBUG: Token meta fetched - Symbol: ${symbol}, Decimals: ${decimals}`);
     return { symbol, decimals, address: addr };
-  } catch {
+  } catch(e) {
+    console.error(`ERROR: Failed to get token meta for ${addr}: ${e.message}`);
     return { symbol: "UNKNOWN", decimals: 18, address: addr };
   }
 }
 
 // getUsdPrices using CoinLore (current prices)
 async function getUsdPrices() {
+  console.log('DEBUG: Attempting to fetch current USD prices from CoinLore.');
   try {
     const res = await fetch("https://api.coinlore.net/api/tickers/"); // CoinLore API for tickers
     
     if (!res.ok) {
-        console.error(`CoinLore API responded with status: ${res.status} ${res.statusText}`);
+        console.error(`ERROR: CoinLore API responded with status: ${res.status} ${res.statusText}`);
         const errorBody = await res.text();
-        console.error(`CoinLore API error body: ${errorBody.substring(0, 200)}...`);
+        console.error(`ERROR: CoinLore API error body: ${errorBody.substring(0, 200)}...`);
         throw new Error(`CoinLore API failed to fetch prices: ${res.status}`);
     }
 
     const d = await res.json();
     
     if (!d || !Array.isArray(d.data)) {
-        console.error("CoinLore API returned unexpected data structure for tickers:", JSON.stringify(d));
+        console.error("ERROR: CoinLore API returned unexpected data structure for tickers:", JSON.stringify(d));
         throw new Error("CoinLore API returned incomplete or malformed price data.");
     }
 
@@ -156,10 +160,10 @@ async function getUsdPrices() {
     if (wethPrice === 0 || usdcPrice === 0) {
         throw new Error("Could not find WETH or USDC prices in CoinLore API response (symbols not found or price_usd missing).");
     }
-
+    console.log(`DEBUG: CoinLore prices fetched - WETH: ${wethPrice}, USDC: ${usdcPrice}`);
     return { WETH: wethPrice, USDC: usdcPrice };
   } catch (error) {
-    console.error(`Failed to get CURRENT USD prices from CoinLore: ${error.message}`);
+    console.error(`ERROR: Failed to get CURRENT USD prices from CoinLore: ${error.message}`);
     // Fallback to default prices if CoinLore fails
     return { WETH: 0, USDC: 1 }; 
   }
@@ -198,6 +202,7 @@ let consecutiveRpcErrors = 0;
 const MAX_CONSECUTIVE_RPC_ERRORS = 2; 
 
 async function getMintEventBlock(manager, tokenId, provider, ownerAddress) {
+  console.log(`DEBUG: Starting getMintEventBlock for tokenId: ${tokenId}.`);
   const latestBlock = await provider.getBlockNumber();
   const zeroAddress = "0x0000000000000000000000000000000000000000";
   const RPC_QUERY_WINDOW = 49999;       
@@ -208,33 +213,41 @@ async function getMintEventBlock(manager, tokenId, provider, ownerAddress) {
 
   while (toBlock >= 0) { 
     if (consecutiveRpcErrors >= MAX_CONSECUTIVE_RPC_ERRORS) {
-        console.error(`Exceeded ${MAX_CONSECUTIVE_RPC_ERRORS} consecutive RPC errors. Aborting getMintEventBlock for tokenId ${tokenId}.`);
+        console.error(`ERROR: Exceeded ${MAX_CONSECUTIVE_RPC_ERRORS} consecutive RPC errors. Aborting getMintEventBlock for tokenId ${tokenId}.`);
         throw new Error(`Too many consecutive RPC errors. Could not find mint event.`);
     }
 
     if (fromBlock < 0) fromBlock = 0; 
     const filter = manager.filters.Transfer(zeroAddress, null, tokenId);
+    console.log(`DEBUG: Querying RPC for Transfer event in block range ${fromBlock}-${toBlock}`);
     try {
       const events = await manager.queryFilter(filter, fromBlock, toBlock);
       const mint = events.find(e => e.args && e.args.to.toLowerCase() === ownerAddress);
       if (mint) {
         consecutiveRpcErrors = 0; 
+        console.log(`DEBUG: Mint event found at block ${mint.blockNumber} for tokenId ${tokenId}.`);
         return mint.blockNumber; 
       }
       consecutiveRpcErrors = 0; 
     } catch (e) {
       consecutiveRpcErrors++; 
-      console.warn(`Error querying block range ${fromBlock}-${toBlock}: ${e.message}. Consecutive errors: ${consecutiveRpcErrors}. Attempting next window.`);
+      console.warn(`WARN: Error querying block range ${fromBlock}-${toBlock}: ${e.message}. Consecutive errors: ${consecutiveRpcErrors}. Attempting next window.`);
     }
     toBlock = fromBlock - 1;
     fromBlock = toBlock - RPC_QUERY_WINDOW; 
   }
+  console.log(`DEBUG: Mint event not found for tokenId ${tokenId} after full search.`);
   throw new Error("Mint event not found for tokenId");
 }
 
 // getBlockTimestamp: Defined at top-level for accessibility
 async function getBlockTimestamp(blockNumber) {
+  console.log(`DEBUG: Getting timestamp for block: ${blockNumber}`);
   const block = await provider.getBlock(blockNumber);
+  if (!block) {
+      throw new Error(`Block ${blockNumber} not found.`);
+  }
+  console.log(`DEBUG: Timestamp for block ${blockNumber}: ${new Date(block.timestamp * 1000).toISOString()}`);
   return block.timestamp * 1000; // JS Date expects ms
 }
 
@@ -245,27 +258,29 @@ let coingeckoHistoricalCooldownUntil = 0;
 async function fetchHistoricalPrice(coinId, dateStr) {
   const cacheKey = `${coinId}-${dateStr}`;
   if (historicalPriceCache[cacheKey]) {
+    console.log(`DEBUG: Using cached historical price for ${cacheKey}`);
     return historicalPriceCache[cacheKey];
   }
 
   if (Date.now() < coingeckoHistoricalCooldownUntil) {
-      console.warn(`CoinGecko Historical API still on cooldown. Skipping request for ${cacheKey}.`);
+      console.warn(`WARN: CoinGecko Historical API still on cooldown. Skipping request for ${cacheKey}.`);
       return 0; 
   }
 
+  console.log(`DEBUG: Fetching historical price for ${cacheKey} from CoinGecko.`);
   try {
     const url = `https://api.coingecko.com/api/v3/coins/${coinId}/history?date=${dateStr}`;
     const res = await fetch(url);
 
     if (!res.ok) {
-        console.error(`CoinGecko Historical API responded with status: ${res.status} ${res.statusText}`);
+        console.error(`ERROR: CoinGecko Historical API responded with status: ${res.status} ${res.statusText}`);
         const errorBody = await res.text();
-        console.error(`CoinGecko Historical API error body: ${errorBody.substring(0, 200)}...`);
+        console.error(`ERROR: CoinGecko Historical API error body: ${errorBody.substring(0, 200)}...`);
         if (res.status === 429) {
             const retryAfter = res.headers.get('Retry-After'); 
             const cooldownDuration = (retryAfter ? parseInt(retryAfter) * 1000 : 60 * 1000); 
             coingeckoHistoricalCooldownUntil = Date.now() + cooldownDuration;
-            console.warn(`CoinGecko Historical API rate limit hit. Setting cooldown for ${cooldownDuration / 1000} seconds.`);
+            console.warn(`WARN: CoinGecko Historical API rate limit hit. Setting cooldown for ${cooldownDuration / 1000} seconds.`);
             return 0; 
         }
         throw new Error(`CoinGecko Historical API failed to fetch price for ${coinId} on ${dateStr}: ${res.status}`);
@@ -274,73 +289,86 @@ async function fetchHistoricalPrice(coinId, dateStr) {
     const data = await res.json();
     
     if (!data || !data.market_data || !data.market_data.current_price || !data.market_data.current_price.usd) {
-        console.error(`CoinGecko Historical API returned unexpected data structure for ${coinId} on ${dateStr}:`, JSON.stringify(data));
+        console.error(`ERROR: CoinGecko Historical API returned unexpected data structure for ${coinId} on ${dateStr}:`, JSON.stringify(data));
         throw new Error(`CoinGecko Historical API returned incomplete data for ${coinId} on ${dateStr}.`);
     }
 
     const price = data.market_data.current_price.usd || 0;
     historicalPriceCache[cacheKey] = price; 
+    console.log(`DEBUG: Fetched historical price for ${cacheKey}: ${price}`);
     return price;
   } catch (error) {
-    console.error(`Failed to get HISTORICAL USD price from CoinGecko for ${coinId} on ${dateStr}: ${error.message}`);
+    console.error(`ERROR: Failed to get HISTORICAL USD price from CoinGecko for ${cacheKey}: ${error.message}`);
     return 0; 
   }
 }
 
 // --- Refactored LP Position Data Fetcher ---
 async function getFormattedPositionData(walletAddress) {
+  console.log(`DEBUG: Starting getFormattedPositionData for wallet: ${walletAddress}`);
   let responseMessage = "";
   let prices = { WETH: 0, USDC: 0 }; 
 
   try {
     // Fetch CURRENT prices from CoinLore
+    console.log('DEBUG: Calling getUsdPrices (CoinLore)');
     prices = await getUsdPrices(); 
+    console.log('DEBUG: getUsdPrices (CoinLore) completed.');
 
     const manager = new ethers.Contract(managerAddress, managerAbi, provider);
-    // Removed hardcoded poolAddress initialization from here
-    // const pool = new ethers.Contract(poolAddress, poolAbi, provider); 
-
     // Instantiate Uniswap V3 Factory contract
     const factory = new ethers.Contract(factoryAddress, factoryAbi, provider);
 
+    console.log(`DEBUG: Getting balanceOf ${walletAddress}`);
     const [balance] = await Promise.all([
       manager.balanceOf(walletAddress)
     ]);
+    console.log(`DEBUG: Wallet has ${balance.toString()} positions.`);
 
     responseMessage += `*👜 Wallet: ${walletAddress.substring(0, 6)}...${walletAddress.substring(38)}*\n\n`;
-    responseMessage += `✨ You own *${balance.toString()}* position(s) in Uniswap V3 pools\n`; // Generalize pool type
+    responseMessage += `✨ You own *${balance.toString()}* position(s) in Uniswap V3 pools\n`; 
 
     if (balance === 0n) {
+      console.log('DEBUG: No positions found. Returning.');
       return responseMessage;
     }
 
     let totalFeeUSD = 0;
-    let startPrincipalUSD = null; // Overall portfolio initial investment
-    let startDate = null; // Overall portfolio oldest position start date
-    let currentTotalPortfolioValue = 0; // Accumulates total value of all positions including fees
-    let totalPortfolioPrincipalUSD = 0; // Accumulates principal value for ALL positions, excluding fees
+    let startPrincipalUSD = null; 
+    let startDate = null; 
+    let currentTotalPortfolioValue = 0; 
+    let totalPortfolioPrincipalUSD = 0; 
 
     for (let i = 0n; i < balance; i++) {
+      console.log(`DEBUG: Processing position #${i.toString()}`);
       responseMessage += `\n--- *Position #${i.toString()}* ---\n`;
       const tokenId = await manager.tokenOfOwnerByIndex(walletAddress, i);
+      console.log(`DEBUG: Token ID: ${tokenId.toString()}`);
       responseMessage += `🔹 Token ID: \`${tokenId.toString()}\`\n`;
       
       const pos = await manager.positions(tokenId);
+      console.log(`DEBUG: Position details fetched for tokenId ${tokenId}. pos.token0: ${pos.token0}, pos.token1: ${pos.token1}, pos.fee: ${pos.fee}`);
+
       const [t0, t1] = await Promise.all([
         getTokenMeta(pos.token0),
         getTokenMeta(pos.token1)
       ]);
+      console.log(`DEBUG: Token metadata fetched for pool tokens.`);
 
       // Dynamically get pool address for this specific NFT's token0, token1, and fee tier
+      console.log(`DEBUG: Getting pool address via factory for ${t0.symbol}/${t1.symbol} fee: ${pos.fee}`);
       const currentNFTPoolAddress = await factory.getPool(pos.token0, pos.token1, pos.fee);
+      console.log(`DEBUG: Pool address found: ${currentNFTPoolAddress}`);
       
       // Instantiate a new pool contract for this specific NFT's pool
       const currentNFTPool = new ethers.Contract(currentNFTPoolAddress, poolAbi, provider);
       
       // Get slot0 data for this specific pool
+      console.log(`DEBUG: Getting slot0 data for pool ${currentNFTPoolAddress}`);
       const slot0 = await currentNFTPool.slot0();
       const sqrtP = slot0[0];
       const nativeTick = slot0[1];
+      console.log(`DEBUG: slot0 data fetched. sqrtPriceX96: ${sqrtP}, tick: ${nativeTick}`);
 
 
       responseMessage += `🔸 Pool: ${t0.symbol}/${t1.symbol} (${(Number(pos.fee) / 10000).toFixed(2)}%)`; // Add fee tier to pool display
@@ -353,7 +381,9 @@ async function getFormattedPositionData(walletAddress) {
 
       // Get mint event and analyze initial investment (uses CoinGecko for historical)
       try {
+        console.log(`DEBUG: Attempting to get mint block for tokenId ${tokenId}.`);
         const mintBlock = await getMintEventBlock(manager, tokenId, provider, walletAddress);
+        console.log(`DEBUG: Mint block for tokenId ${tokenId}: ${mintBlock}`);
         const startTimestampMs = await getBlockTimestamp(mintBlock);
         currentPositionStartDate = new Date(startTimestampMs);
         
@@ -368,8 +398,11 @@ async function getFormattedPositionData(walletAddress) {
         const yearCurrent = currentPositionStartDate.getFullYear();
         const dateStrCurrent = `${dayCurrent}-${monthCurrent}-${yearCurrent}`;
         
+        console.log(`DEBUG: Fetching historical WETH for ${dateStrCurrent}`);
         const histWETHCurrent = await fetchHistoricalPrice('ethereum', dateStrCurrent);
+        console.log(`DEBUG: Fetching historical USDC for ${dateStrCurrent}`);
         const histUSDCCurrent = await fetchHistoricalPrice('usd-coin', dateStrCurrent);
+        console.log(`DEBUG: Historical prices fetched. WETH: ${histWETHCurrent}, USDC: ${histUSDCCurrent}`);
 
         const [histAmt0Current, histAmt1Current] = getAmountsFromLiquidity(
             pos.liquidity,
@@ -404,6 +437,7 @@ async function getFormattedPositionData(walletAddress) {
         responseMessage += `💰 Initial Investment: $${currentPositionInitialPrincipalUSD.toFixed(2)}\n`; 
       } catch (error) {
         responseMessage += `⚠️ Could not analyze position history: ${escapeMarkdown(error.message)}\n`; // Escaped error message
+        console.error(`ERROR: Error in historical analysis for position ${tokenId}: ${error.message}`);
       }
 
       // Current position analysis
@@ -412,9 +446,7 @@ async function getFormattedPositionData(walletAddress) {
       const currentPrice = tickToPricePerToken0(Number(nativeTick), Number(t0.decimals), Number(t1.decimals));
 
       responseMessage += `\n*Price Information*\n`; // Removed icon
-      // Removed: responseMessage += `🏷️ Tick Range: \`[${pos.tickLower}, ${pos.tickUpper}]\`\n`;
       responseMessage += `🏷️ Range: $${lowerPrice.toFixed(2)} - $${upperPrice.toFixed(2)} ${t1.symbol}/${t0.symbol}\n`; // Changed "Price Range" to "Range" and added label icon
-      // Removed: responseMessage += `🌐 Current Tick: \`${nativeTick}\`\n`;
       responseMessage += `🏷️ Current Price: $${currentPrice.toFixed(2)} ${t1.symbol}/${t0.symbol}\n`; // 2 decimals and added label icon
       
       const inRange = nativeTick >= pos.tickLower && nativeTick < pos.tickUpper;
