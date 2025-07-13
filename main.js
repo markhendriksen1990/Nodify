@@ -21,11 +21,11 @@ const myAddress = "0x2FD24cC510b7a40b176B05A5Bb628d024e3B6886";
 // Uniswap V3 Factory Address on Base (You can find this on Chainlist.org or Uniswap V3 docs)
 const factoryAddress = "0x33128a8fc17869b8dceb626f79ceefbeed336b3b"; // Uniswap V3 Factory on Base
 
-// --- ABIs (FIXED: positions function signature using full JSON object) ---
+// --- ABIs ---
 const managerAbi = [
   "function balanceOf(address owner) view returns (uint256)",
   "function tokenOfOwnerByIndex(address owner, uint256 index) view returns (uint256)",
-  // CORRECTED: 'positions' function signature using its full JSON object representation
+  // Corrected 'positions' function signature. This is the canonical signature.
   {
     "inputs": [
       { "internalType": "uint256", "name": "tokenId", "type": "uint256" }
@@ -607,4 +607,47 @@ async function processTelegramCommand(update) {
 
 // Function to send messages back to Telegram
 async function sendMessage(chatId, text) {
-    const telegramApiUrl = `https
+    const telegramApiUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
+    try {
+        const response = await fetch(telegramApiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                chat_id: chatId,
+                text: text,
+                parse_mode: 'Markdown',
+                disable_web_page_preview: true
+            })
+        });
+        const data = await response.json();
+        if (!response.ok) {
+            console.error('Failed to send message:', data);
+        }
+    } catch (error) {
+        console.error('Error sending message to Telegram:', error);
+    }
+}
+
+// Function to send chat actions (like 'typing')
+async function sendChatAction(chatId, action) {
+    const telegramApiUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendChatAction`;
+    try {
+        await fetch(telegramApiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                chat_id: chatId,
+                action: action
+            })
+        });
+    } catch (error) {
+        console.error('Error sending chat action to Telegram:', error);
+    }
+}
+
+
+// Start the Express server
+app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+    console.log(`Telegram webhook URL: ${RENDER_WEBHOOK_URL}/bot${TELEGRAM_BOT_TOKEN}/webhook`);
+});
