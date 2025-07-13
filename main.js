@@ -21,7 +21,6 @@ const myAddress = "0x2FD24cC510b7a40b176B05A5Bb628d024e3B6886";
 const managerAbi = [
   "function balanceOf(address owner) view returns (uint256)",
   "function tokenOfOwnerByIndex(address owner, uint256 index) view returns (uint256)",
-  // Corrected 'positions' function signature. This is the exact return type expected.
   "function positions(uint256 tokenId) view returns (uint96 nonce, address operator, address token0, address token1, uint24 fee, int24 tickLower, int24 tickUpper, uint128 liquidity, uint256 feeGrowthInside0LastX128, uint256 feeGrowthInside1LastX128, uint128 tokensOwed0, uint128 tokensOwed1)",
   "event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)",
   "function collect(tuple(uint256 tokenId, address recipient, uint128 amount0Max, uint128 amount1Max)) external returns (uint256 amount0, uint256 amount1)"
@@ -45,7 +44,7 @@ const { formatUnits } = ethers;
 
 // Helper to escape markdown characters for Telegram messages
 function escapeMarkdown(text) {
-    if (typeof text !== 'string') return ''; 
+    if (typeof text !== 'string') return ''; // Handle non-string inputs
     return text.replace(/[_*[\]()~`>#+-=|{}.!]/g, '\\$&');
 }
 
@@ -163,48 +162,30 @@ function formatElapsedDaysHours(ms) {
   return `${days} days, ${hours} `;
 }
 
-// MODIFIED: getMintEventBlock - Reduced RPC_QUERY_WINDOW AND added RPC error retry limit
-let consecutiveRpcErrors = 0;
-const MAX_CONSECUTIVE_RPC_ERRORS = 2; // Allow 2 consecutive RPC errors before giving up on history
-
+// getMintEventBlock using 49999 block query window as requested
 async function getMintEventBlock(manager, tokenId, provider, ownerAddress) {
   const latestBlock = await provider.getBlockNumber();
   const zeroAddress = "0x0000000000000000000000000000000000000000";
-  const MAX_BLOCK_SEARCH_DEPTH = 500000; // Overall search limit (roughly 2-3 months on Base)
-  const RPC_QUERY_WINDOW = 4999;       // Reduced RPC query window to avoid "invalid block range params"
+  const RPC_QUERY_WINDOW = 49999;       
 
   let fromBlock = latestBlock - RPC_QUERY_WINDOW;
   let toBlock = latestBlock;
   ownerAddress = ownerAddress.toLowerCase();
 
-  // Reset counter for a new tokenId search
-  // No, actually, consecutiveRpcErrors should be global for the current bot instance
-  // consecutiveRpcErrors = 0; // This should ideally be per-request if multiple simultaneous requests
-
-  while (toBlock >= 0 && (latestBlock - fromBlock) < MAX_BLOCK_SEARCH_DEPTH) { 
-    if (consecutiveRpcErrors >= MAX_CONSECUTIVE_RPC_ERRORS) {
-        console.error(`Exceeded ${MAX_CONSECUTIVE_RPC_ERRORS} consecutive RPC errors. Aborting getMintEventBlock for tokenId ${tokenId}.`);
-        throw new Error(`Too many consecutive RPC errors. Could not find mint event.`);
-    }
-
-    if (fromBlock < 0) fromBlock = 0; 
+  while (toBlock >= 0) { 
+    if (fromBlock < 0) fromBlock = 0;
     const filter = manager.filters.Transfer(zeroAddress, null, tokenId);
     try {
       const events = await manager.queryFilter(filter, fromBlock, toBlock);
       const mint = events.find(e => e.args && e.args.to.toLowerCase() === ownerAddress);
-      if (mint) {
-        consecutiveRpcErrors = 0; // Reset on success
-        return mint.blockNumber; 
-      }
-      consecutiveRpcErrors = 0; // Reset on successful query (even if mint not found in this window)
+      if (mint) return mint.blockNumber;
     } catch (e) {
-      consecutiveRpcErrors++; // Increment on error
-      console.warn(`Error querying block range ${fromBlock}-${toBlock}: ${e.message}. Consecutive errors: ${consecutiveRpcErrors}. Attempting next window.`);
+      console.warn(`Error querying block range ${fromBlock}-${toBlock}: ${e.message}. Ignoring and reducing window.`);
     }
     toBlock = fromBlock - 1;
     fromBlock = toBlock - RPC_QUERY_WINDOW; 
   }
-  throw new Error(`Mint event not found for tokenId within the last ${MAX_BLOCK_SEARCH_DEPTH} blocks.`);
+  throw new Error("Mint event not found for tokenId");
 }
 
 // getBlockTimestamp: Defined at top-level for accessibility
@@ -296,9 +277,10 @@ async function getFormattedPositionData(walletAddress) {
     }
 
     let totalFeeUSD = 0;
-    let startPrincipalUSD = null; 
-    let startDate = null; 
-    let lastPortfolioValue = 0;
+    let startPrincipalUSD = null; // Overall portfolio initial investment
+    let startDate = null; // Overall portfolio oldest position start date
+    let totalPortfolioPrincipalUSD = 0; // NEW: Accumulates principal value for ALL positions, excluding fees
+    let currentTotalPortfolioValue = 0; // Accumulates total value of all positions including fees
 
     for (let i = 0n; i < balance; i++) {
       responseMessage += `\n--- *Position #${i.toString()}* ---\n`;
@@ -403,6 +385,8 @@ async function getFormattedPositionData(walletAddress) {
       }
 
       const principalUSD = amtWETH * prices.WETH + amtUSDC * prices.USDC;
+      totalPortfolioPrincipalUSD += principalUSD; // Accumulate for overall sum excluding fees
+
       const ratio = getRatio(amtWETH * prices.WETH, amtUSDC * prices.USDC);
 
       responseMessage += `\n💧 *Current Position Holdings*\n`;
@@ -454,7 +438,7 @@ async function getFormattedPositionData(walletAddress) {
       responseMessage += `\n🏦 *Total Position Value (incl. fees): $${currentTotalValue.toFixed(2)}*\n`;
 
       totalFeeUSD += (feeUSD0 + feeUSD1);
-      lastPortfolioValue = currentTotalValue;
+      currentTotalPortfolioValue += currentTotalValue; // Accumulate total value of all positions including fees
     }
 
     // --- Overall Portfolio Performance Analysis Section ---
@@ -465,14 +449,14 @@ async function getFormattedPositionData(walletAddress) {
         const rewardsPerDay = rewardsPerHour * 24;
         const rewardsPerMonth = rewardsPerDay * 30.44;
         const rewardsPerYear = rewardsPerDay * 365.25;
-        const totalReturn = lastPortfolioValue - startPrincipalUSD;
+        const totalReturn = currentTotalPortfolioValue - startPrincipalUSD; // Total return is value_with_fees - initial_investment
         const totalReturnPercent = (totalReturn / startPrincipalUSD) * 100;
         const feesAPR = (rewardsPerYear / startPrincipalUSD) * 100;
 
         responseMessage += `\n=== *OVERALL PORTFOLIO PERFORMANCE* ===\n`;
         // Removed: Oldest Position and Analysis Period lines
         responseMessage += `💰 Initial Investment: $${startPrincipalUSD.toFixed(2)}\n`;
-        responseMessage += `💰 Current Value: $${lastPortfolioValue.toFixed(2)}\n`;
+        responseMessage += `💰 Current Value: $${totalPortfolioPrincipalUSD.toFixed(2)}\n`; // CORRECTED: Use totalPrincipalValueOverall
         responseMessage += `💰 Total Return: $${totalReturn.toFixed(2)} (${totalReturnPercent.toFixed(2)}%)\n`;
         
         responseMessage += `\n📊 *Fee Performance*\n`;
@@ -481,7 +465,7 @@ async function getFormattedPositionData(walletAddress) {
         responseMessage += `💎 Fees APR: ${feesAPR.toFixed(2)}%\n`;
 
         // Added: All time gains
-        const allTimeGains = totalReturn + totalFeeUSD;
+        const allTimeGains = totalReturn + totalFeeUSD; // Sum of price return and total fees earned
         responseMessage += `\n💲 All time gains: $${allTimeGains.toFixed(2)}\n`;
 
         responseMessage += `\n🎯 *Overall Performance*\n`;
