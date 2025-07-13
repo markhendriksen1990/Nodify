@@ -12,7 +12,7 @@ const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 
 // --- Ethers.js Provider and Contract Addresses ---
 //const provider = new ethers.JsonRpcProvider("https://base.publicnode.com");
-const provider = new ethers.providers.JsonRpcProvider("https://base-sepolia.infura.io/v3/cceebb32fc834db39318ba89b48471a1")
+const provider = new ethers.JsonRpcProvider("https://base-sepolia.infura.io/v3/cceebb32fc834db39318ba89b48471a1")
 
 
 const managerAddress = "0x03a520b32c04bf3beef7beb72e919cf822ed34f1";
