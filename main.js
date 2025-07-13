@@ -483,7 +483,7 @@ async function getFormattedPositionData(walletAddress) {
         // Removed: Oldest Position and Analysis Period lines
         responseMessage += `🏛 Initial Investment: $${startPrincipalUSD.toFixed(2)}\n`;
         responseMessage += `🏛 Total holdings: $${totalPortfolioPrincipalUSD.toFixed(2)}\n`; // Use totalPortfolioPrincipalUSD
-        responseMessage += `🏛 Holdings Return: $${totalReturn.toFixed(2)} (${totalReturnPercent.toFixed(2)}%)\n`;
+        responseMessage += `📈 Holdings Return: $${totalReturn.toFixed(2)} (${totalReturnPercent.toFixed(2)}%)\n`;
         
         responseMessage += `\n*Fee Performance*\n`;
         responseMessage += `💰 Total Fees Earned: $${totalFeeUSD.toFixed(2)}\n`;
