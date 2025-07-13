@@ -373,9 +373,9 @@ async function getFormattedPositionData(walletAddress) {
 
       responseMessage += `\n*Price Information*\n`; // Removed icon
       // Removed: responseMessage += `🏷️ Tick Range: \`[${pos.tickLower}, ${pos.tickUpper}]\`\n`;
-      responseMessage += `Range: $${lowerPrice.toFixed(2)} - $${upperPrice.toFixed(2)} ${t1.symbol}/${t0.symbol}\n`; // Changed "Price Range" to "Range"
+      responseMessage += `🏷️ Range: $${lowerPrice.toFixed(2)} - $${upperPrice.toFixed(2)} ${t1.symbol}/${t0.symbol}\n`; // Changed "Price Range" to "Range"
       // Removed: responseMessage += `🌐 Current Tick: \`${nativeTick}\`\n`;
-      responseMessage += `🌐 Current Price: $${currentPrice.toFixed(2)} ${t1.symbol}/${t0.symbol}\n`; // 2 decimals
+      responseMessage += `🏷️ Current Price: $${currentPrice.toFixed(2)} ${t1.symbol}/${t0.symbol}\n`; // 2 decimals
       
       const inRange = nativeTick >= pos.tickLower && nativeTick < pos.tickUpper;
       responseMessage += `📍 In Range? ${inRange ? "✅ Yes" : "❌ No"}\n`;
@@ -445,11 +445,11 @@ async function getFormattedPositionData(walletAddress) {
           const feesAPR = (rewardsPerYear / currentPositionInitialPrincipalUSD) * 100;
 
           responseMessage += `\n*Fee Performance*\n`; // Removed icon
-          responseMessage += `💰 Fees per hour: $${rewardsPerHour.toFixed(2)}\n`;
-          responseMessage += `💰 Fees per day: $${rewardsPerDay.toFixed(2)}\n`;
-          responseMessage += `💰 Fees per month: $${rewardsPerMonth.toFixed(2)}\n`;
-          responseMessage += `💰 Fees per year: $${rewardsPerYear.toFixed(2)}\n`;
-          responseMessage += `💰 Fees APR: ${feesAPR.toFixed(2)}%\n`;
+          responseMessage += `💧 Fees/hour: $${rewardsPerHour.toFixed(2)}\n`;
+          responseMessage += `💧 Fees/day: $${rewardsPerDay.toFixed(2)}\n`;
+          responseMessage += `💧 Fees/month: $${rewardsPerMonth.toFixed(2)}\n`;
+          responseMessage += `💧 Fees/year: $${rewardsPerYear.toFixed(2)}\n`;
+          responseMessage += `💧 Fees APR: ${feesAPR.toFixed(2)}%\n`;
       } else {
           responseMessage += `\n⚠️ Could not determine per-position fee performance (initial investment unknown or zero).\n`;
       }
@@ -492,7 +492,7 @@ async function getFormattedPositionData(walletAddress) {
         responseMessage += `📈 Holdings Change: $${totalReturn.toFixed(2)} (${totalReturnPercent.toFixed(2)}%)\n`; // Changed to Holdings Return
         
         responseMessage += `\n*Fee Performance*\n`; // Removed icon
-        responseMessage += `💰 Total Fees Earned: $${totalFeeUSD.toFixed(2)}\n`;
+        responseMessage += `📈 Total Fees Earned: $${totalFeeUSD.toFixed(2)}\n`;
         // Removed: Fees per hour/day/month/year lines
         responseMessage += `💰 Fees APR: ${feesAPR.toFixed(2)}%\n`;
 
