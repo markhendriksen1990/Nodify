@@ -361,7 +361,7 @@ async function getFormattedPositionData(walletAddress) {
 
 
         responseMessage += `📅 Created: ${currentPositionStartDate.toISOString().replace('T', ' ').slice(0, 19)}\n`;
-        responseMessage += `💰 Initial Investment: $${currentPositionInitialPrincipalUSD.toFixed(2)}\n`; // Changed "Est. Investment" to "Investment"
+        responseMessage += `💰 Initial Investment: $${currentPositionInitialPrincipalUSD.toFixed(2)}\n`; 
       } catch (error) {
         responseMessage += `⚠️ Could not analyze position history: ${escapeMarkdown(error.message)}\n`; // Escaped error message
       }
@@ -407,7 +407,7 @@ async function getFormattedPositionData(walletAddress) {
       responseMessage += `💧 ${formatTokenAmount(amtWETH, 6)} WETH ($${(amtWETH * prices.WETH).toFixed(2)})\n`;
       responseMessage += `💧 ${formatTokenAmount(amtUSDC, 2)} USDC ($${(amtUSDC * prices.USDC).toFixed(2)})\n`;
       responseMessage += `💧 Ratio: WETH/USDC ${ratio.weth}/${ratio.usdc}%\n`;
-      responseMessage += `💧 Total Position Value: *$${principalUSD.toFixed(2)}*\n`;
+      responseMessage += `💧 Holdings: *$${principalUSD.toFixed(2)}*\n`; // Changed to Holdings
 
       // Uncollected fees analysis
       const xp = await manager.collect.staticCall({
@@ -449,12 +449,12 @@ async function getFormattedPositionData(walletAddress) {
       }
 
       const currentTotalValue = principalUSD + totalPositionFeesUSD;
-      responseMessage += `\n🏦 *Total Position Value (incl. fees): $${currentTotalValue.toFixed(2)}*\n`;
+      responseMessage += `\n🏦 Position Value: *$${currentTotalValue.toFixed(2)}*\n`; // Changed to Position Value
 
       // NEW: Position Total return + Fees
       // This calculates the return + fees for this specific position
-      const positionTotalReturn = principalUSD - currentPositionInitialPrincipalUSD; // Principal gain/loss for this position
-      const positionTotalGains = positionTotalReturn + totalPositionFeesUSD; // Total gain including fees for this position
+      const positionReturn = principalUSD - currentPositionInitialPrincipalUSD; // Principal gain/loss for this position
+      const positionTotalGains = positionReturn + totalPositionFeesUSD; // Total gain including fees for this position
       if (positionHistoryAnalysisSucceeded && currentPositionInitialPrincipalUSD > 0) {
           responseMessage += `💲 Position Total return + Fees: $${positionTotalGains.toFixed(2)}\n`;
       }
@@ -482,7 +482,7 @@ async function getFormattedPositionData(walletAddress) {
         responseMessage += `\n=== *OVERALL PORTFOLIO PERFORMANCE* ===\n`;
         // Removed: Oldest Position and Analysis Period lines
         responseMessage += `💰 Initial Investment: $${startPrincipalUSD.toFixed(2)}\n`;
-        responseMessage += `💰 Current Value: $${totalPortfolioPrincipalUSD.toFixed(2)}\n`; 
+        responseMessage += `💰 Current Value: $${totalPortfolioPrincipalUSD.toFixed(2)}\n`; // Use totalPortfolioPrincipalUSD
         responseMessage += `💰 Total Return: $${totalReturn.toFixed(2)} (${totalReturnPercent.toFixed(2)}%)\n`;
         
         responseMessage += `\n📊 *Fee Performance*\n`;
