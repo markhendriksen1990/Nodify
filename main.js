@@ -373,9 +373,9 @@ async function getFormattedPositionData(walletAddress) {
 
       responseMessage += `\n*Price Information*\n`; // Removed icon
       // Removed: responseMessage += `🏷️ Tick Range: \`[${pos.tickLower}, ${pos.tickUpper}]\`\n`;
-      responseMessage += `Range: $${lowerPrice.toFixed(2)} - $${upperPrice.toFixed(2)} ${t1.symbol}/${t0.symbol}\n`; // Changed "Price Range" to "Range"
+      responseMessage += `🏷️ Range: $${lowerPrice.toFixed(2)} - $${upperPrice.toFixed(2)} ${t1.symbol}/${t0.symbol}\n`; // Changed "Price Range" to "Range" and added label icon
       // Removed: responseMessage += `🌐 Current Tick: \`${nativeTick}\`\n`;
-      responseMessage += `🌐 Current Price: $${currentPrice.toFixed(2)} ${t1.symbol}/${t0.symbol}\n`; // 2 decimals
+      responseMessage += `🏷️ Current Price: $${currentPrice.toFixed(2)} ${t1.symbol}/${t0.symbol}\n`; // 2 decimals and added label icon
       
       const inRange = nativeTick >= pos.tickLower && nativeTick < pos.tickUpper;
       responseMessage += `📍 In Range? ${inRange ? "✅ Yes" : "❌ No"}\n`;
@@ -415,7 +415,7 @@ async function getFormattedPositionData(walletAddress) {
       }
 
 
-      // Uncollected fees analysis
+      // Uncollected Fees analysis
       const xp = await manager.collect.staticCall({
         tokenId,
         recipient: walletAddress,
@@ -432,7 +432,8 @@ async function getFormattedPositionData(walletAddress) {
       responseMessage += `\n*Uncollected Fees*\n`; // Removed icon
       responseMessage += `💰 ${formatTokenAmount(fee0, 6)} ${t0.symbol} ($${feeUSD0.toFixed(2)})\n`;
       responseMessage += `💰 ${formatTokenAmount(fee1, 2)} ${t1.symbol} ($${feeUSD1.toFixed(2)})\n`;
-      responseMessage += `💰 Total Fees: *$${totalPositionFeesUSD.toFixed(2)}*\n`;
+      responseMessage += `💰 Total Fees: *$${totalPositionFeesUSD.toFixed(2)}*\n`; // Add Total Fees to Uncollected Fees
+
 
       // Per-Position Fee Performance (uses currentPositionStartDate and currentPositionInitialPrincipalUSD)
       if (positionHistoryAnalysisSucceeded && currentPositionInitialPrincipalUSD !== null && currentPositionInitialPrincipalUSD > 0) {
@@ -445,11 +446,11 @@ async function getFormattedPositionData(walletAddress) {
           const feesAPR = (rewardsPerYear / currentPositionInitialPrincipalUSD) * 100;
 
           responseMessage += `\n*Fee Performance*\n`; // Removed icon
-          responseMessage += `💰 Fees per hour: $${rewardsPerHour.toFixed(2)}\n`;
-          responseMessage += `💰 Fees per day: $${rewardsPerDay.toFixed(2)}\n`;
-          responseMessage += `💰 Fees per month: $${rewardsPerMonth.toFixed(2)}\n`;
-          responseMessage += `💰 Fees per year: $${rewardsPerYear.toFixed(2)}\n`;
-          responseMessage += `💰 Fees APR: ${feesAPR.toFixed(2)}%\n`;
+          responseMessage += `💎 Fees per hour: $${rewardsPerHour.toFixed(2)}\n`; // Added diamond icon
+          responseMessage += `💎 Fees per day: $${rewardsPerDay.toFixed(2)}\n`; // Added diamond icon
+          responseMessage += `💎 Fees per month: $${rewardsPerMonth.toFixed(2)}\n`; // Added diamond icon
+          responseMessage += `💎 Fees per year: $${rewardsPerYear.toFixed(2)}\n`; // Added diamond icon
+          responseMessage += `💎 Fees APR: ${feesAPR.toFixed(2)}%\n`; // Added diamond icon
       } else {
           responseMessage += `\n⚠️ Could not determine per-position fee performance (initial investment unknown or zero).\n`;
       }
@@ -458,7 +459,6 @@ async function getFormattedPositionData(walletAddress) {
       responseMessage += `\n🏦 Position Value: *$${currentTotalValue.toFixed(2)}*\n`; // Changed to Position Value
 
       // NEW: Position Total return + Fees
-      // This calculates the return + fees for this specific position
       const positionReturn = principalUSD - currentPositionInitialPrincipalUSD; // Principal gain/loss for this position
       const positionTotalGains = positionReturn + totalPositionFeesUSD; // Total gain including fees for this position
       if (positionHistoryAnalysisSucceeded && currentPositionInitialPrincipalUSD > 0) {
@@ -487,127 +487,9 @@ async function getFormattedPositionData(walletAddress) {
 
         responseMessage += `\n=== *OVERALL PORTFOLIO PERFORMANCE* ===\n`;
         // Removed: Oldest Position and Analysis Period lines
-        responseMessage += `🏛 Initial Investment: $${startPrincipalUSD.toFixed(2)}\n`;
+        responseMessage += `🏛 Initial Investment: $${startPrincipalUSD.toFixed(2)}\n`; // Retained icon
         responseMessage += `🏛 Total Holdings: $${totalPortfolioPrincipalUSD.toFixed(2)}\n`; // Use totalPortfolioPrincipalUSD
-        responseMessage += `📈 Holdings Change: $${totalReturn.toFixed(2)} (${totalReturnPercent.toFixed(2)}%)\n`; // Changed to Holdings Return
+        responseMessage += `📈 Holdings Return: $${totalReturn.toFixed(2)} (${totalReturnPercent.toFixed(2)}%)\n`; // Changed to Holdings Return
         
         responseMessage += `\n*Fee Performance*\n`; // Removed icon
-        responseMessage += `💰 Total Fees Earned: $${totalFeeUSD.toFixed(2)}\n`;
-        // Removed: Fees per hour/day/month/year lines
-        responseMessage += `💰 Fees APR: ${feesAPR.toFixed(2)}%\n`;
-
-        // Corrected All time gains: Principal return + Total Fees Earned
-        const allTimeGains = totalReturn + totalFeeUSD; 
-        responseMessage += `\n📈 Total return + Fees: $${allTimeGains.toFixed(2)}\n`; // Changed text
-
-        // Removed: Overall Performance heading and Total APR (incl. price changes) line
-        // If you need the overall APR for the total value (principal + fees) again, re-add this explicitly.
-        // responseMessage += `\n🎯 *Overall Performance*\n`;
-        // const totalAPRInclPriceChanges = ((currentTotalPortfolioValue - startPrincipalUSD) / startPrincipalUSD) * (365.25 / (elapsedMs / (1000 * 60 * 60 * 24))) * 100;
-        // responseMessage += `📈 Total APR (incl. price changes): ${totalAPRInclPriceChanges.toFixed(2)}%\n`;
-    } else {
-        responseMessage += `\n❌ Coingecko API might be on cooldown. Could not determine start date or initial investment.\n`; 
-    }
-
-  } catch (error) {
-    console.error("Error in getFormattedPositionData:", error);
-    responseMessage = `An error occurred while fetching liquidity positions: ${escapeMarkdown(error.message)}. Please try again later.`; 
-  }
-  return responseMessage;
-}
-
-// --- Express App Setup for Webhook ---
-const app = express();
-const PORT = process.env.PORT || 3000;
-
-// Use body-parser to parse JSON payloads from Telegram
-app.use(bodyParser.json());
-
-// Telegram Webhook endpoint
-app.post(`/bot${TELEGRAM_BOT_TOKEN}/webhook`, async (req, res) => {
-    // Validate Telegram's webhook secret
-    const telegramSecret = req.get('X-Telegram-Bot-Api-Secret-Token');
-    if (!WEBHOOK_SECRET || telegramSecret !== WEBHOOK_SECRET) {
-        console.warn('Unauthorized webhook access attempt! Invalid or missing secret token.');
-        return res.status(403).send('Forbidden: Invalid secret token');
-    }
-
-    // IMPORTANT: Always respond with 200 OK immediately to Telegram to acknowledge receipt
-    res.sendStatus(200);
-
-    // Process the command asynchronously in the background.
-    processTelegramCommand(req.body).catch(error => { 
-        console.error("Unhandled error in async Telegram command processing:", error);
-    });
-});
-
-// Asynchronous function to process Telegram commands and send responses
-async function processTelegramCommand(update) {
-    if (update.message) {
-        const messageText = update.message.text;
-        const chatId = update.message.chat.id;
-
-        if (messageText && messageText.startsWith('/positions')) {
-            try {
-                await sendChatAction(chatId, 'typing');
-                const positionData = await getFormattedPositionData(myAddress);
-                await sendMessage(chatId, positionData);
-            } catch (error) {
-                console.error("Error processing /positions command asynchronously:", error);
-                await sendMessage(chatId, "Sorry, I encountered an internal error while fetching positions. Please try again later.");
-            }
-        } else if (messageText && messageText.startsWith('/start')) {
-            await sendMessage(chatId, "Welcome! I can provide you with information about your Uniswap V3 liquidity positions. Type /positions to get a summary.");
-        } else {
-            await sendMessage(chatId, "I received your message, but I only understand the /positions command. If you want to see your positions, type /positions or select it from the menu.");
-        }
-    }
-}
-
-
-// Function to send messages back to Telegram
-async function sendMessage(chatId, text) {
-    const telegramApiUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
-    try {
-        const response = await fetch(telegramApiUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                chat_id: chatId,
-                text: text,
-                parse_mode: 'Markdown',
-                disable_web_page_preview: true
-            })
-        });
-        const data = await response.json();
-        if (!response.ok) {
-            console.error('Failed to send message:', data);
-        }
-    } catch (error) {
-        console.error('Error sending message to Telegram:', error);
-    }
-}
-
-// Function to send chat actions (like 'typing')
-async function sendChatAction(chatId, action) {
-    const telegramApiUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendChatAction`;
-    try {
-        await fetch(telegramApiUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                chat_id: chatId,
-                action: action
-            })
-        });
-    } catch (error) {
-        console.error('Error sending chat action to Telegram:', error);
-    }
-}
-
-
-// Start the Express server
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-    console.log(`Telegram webhook URL: ${RENDER_WEBHOOK_URL}/bot${TELEGRAM_BOT_TOKEN}/webhook`);
-});
+        responseMessage += `💰 Total Fees Earned: $${totalFeeUSD.toFixed(2)}\
