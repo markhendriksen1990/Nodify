@@ -21,11 +21,33 @@ const myAddress = "0x2FD24cC510b7a40b176B05A5Bb628d024e3B6886";
 // Uniswap V3 Factory Address on Base (You can find this on Chainlist.org or Uniswap V3 docs)
 const factoryAddress = "0x33128a8fc17869b8dceb626f79ceefbeed336b3b"; // Uniswap V3 Factory on Base
 
-// --- ABIs ---
+// --- ABIs (FIXED: positions function signature using full JSON object) ---
 const managerAbi = [
   "function balanceOf(address owner) view returns (uint256)",
   "function tokenOfOwnerByIndex(address owner, uint256 index) view returns (uint256)",
-  "function positions(uint256 tokenId) view returns (uint96 nonce, address operator, address token0, address token1, uint24 fee, int24 tickLower, int24 tickUpper, uint128 liquidity, uint256 feeGrowthInside0LastX128, uint256 feeGrowthInside1LastX128, uint128 tokensOwed0, uint128 tokensOwed1)",
+  // CORRECTED: 'positions' function signature using its full JSON object representation
+  {
+    "inputs": [
+      { "internalType": "uint256", "name": "tokenId", "type": "uint256" }
+    ],
+    "name": "positions",
+    "outputs": [
+      { "internalType": "uint96", "name": "nonce", "type": "uint96" },
+      { "internalType": "address", "name": "operator", "type": "address" },
+      { "internalType": "address", "name": "token0", "type": "address" },
+      { "internalType": "address", "name": "token1", "type": "address" },
+      { "internalType": "uint24", "name": "fee", "type": "uint24" },
+      { "internalType": "int24", "name": "tickLower", "type": "int24" },
+      { "internalType": "int24", "name": "tickUpper", "type": "int24" },
+      { "internalType": "uint128", "name": "liquidity", "type": "uint128" },
+      { "internalType": "uint256", "name": "feeGrowthInside0LastX128", "type": "uint256" },
+      { "internalType": "uint256", "name": "feeGrowthInside1LastX128", "type": "uint256" },
+      { "internalType": "uint128", "name": "tokensOwed0", "type": "uint128" },
+      { "internalType": "uint128", "name": "tokensOwed1", "type": "uint128" }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
   "event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)",
   "function collect(tuple(uint256 tokenId, address recipient, uint128 amount0Max, uint128 amount1Max)) external returns (uint256 amount0, uint256 amount1)"
 ];
@@ -391,9 +413,9 @@ async function getFormattedPositionData(walletAddress) {
 
       responseMessage += `\n*Price Information*\n`; // Removed icon
       // Removed: responseMessage += `🏷️ Tick Range: \`[${pos.tickLower}, ${pos.tickUpper}]\`\n`;
-      responseMessage += `🏷️ Range: $${lowerPrice.toFixed(2)} - $${upperPrice.toFixed(2)} ${t1.symbol}/${t0.symbol}\n`; // Changed "Price Range" to "Range"
+      responseMessage += `🏷️ Range: $${lowerPrice.toFixed(2)} - $${upperPrice.toFixed(2)} ${t1.symbol}/${t0.symbol}\n`; // Changed "Price Range" to "Range" and added label icon
       // Removed: responseMessage += `🌐 Current Tick: \`${nativeTick}\`\n`;
-      responseMessage += `🏷️ Current Price: $${currentPrice.toFixed(2)} ${t1.symbol}/${t0.symbol}\n`; // 2 decimals
+      responseMessage += `🏷️ Current Price: $${currentPrice.toFixed(2)} ${t1.symbol}/${t0.symbol}\n`; // 2 decimals and added label icon
       
       const inRange = nativeTick >= pos.tickLower && nativeTick < pos.tickUpper;
       responseMessage += `📍 In Range? ${inRange ? "✅ Yes" : "❌ No"}\n`;
@@ -505,7 +527,7 @@ async function getFormattedPositionData(walletAddress) {
 
         responseMessage += `\n=== *OVERALL PORTFOLIO PERFORMANCE* ===\n`;
         // Removed: Oldest Position and Analysis Period lines
-        responseMessage += `🏛 Initial Investment: $${startPrincipalUSD.toFixed(2)}\n`;
+        responseMessage += `🏛 Initial Investment: $${startPrincipalUSD.toFixed(2)}\n`; // Retained icon
         responseMessage += `🏛 Total Holdings: $${totalPortfolioPrincipalUSD.toFixed(2)}\n`; // Use totalPortfolioPrincipalUSD
         responseMessage += `📈 Holdings Return: $${totalReturn.toFixed(2)} (${totalReturnPercent.toFixed(2)}%)\n`; // Changed to Holdings Return
         
@@ -585,47 +607,4 @@ async function processTelegramCommand(update) {
 
 // Function to send messages back to Telegram
 async function sendMessage(chatId, text) {
-    const telegramApiUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
-    try {
-        const response = await fetch(telegramApiUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                chat_id: chatId,
-                text: text,
-                parse_mode: 'Markdown',
-                disable_web_page_preview: true
-            })
-        });
-        const data = await response.json();
-        if (!response.ok) {
-            console.error('Failed to send message:', data);
-        }
-    } catch (error) {
-        console.error('Error sending message to Telegram:', error);
-    }
-}
-
-// Function to send chat actions (like 'typing')
-async function sendChatAction(chatId, action) {
-    const telegramApiUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendChatAction`;
-    try {
-        await fetch(telegramApiUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                chat_id: chatId,
-                action: action
-            })
-        });
-    } catch (error) {
-        console.error('Error sending chat action to Telegram:', error);
-    }
-}
-
-
-// Start the Express server
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-    console.log(`Telegram webhook URL: ${RENDER_WEBHOOK_URL}/bot${TELEGRAM_BOT_TOKEN}/webhook`);
-});
+    const telegramApiUrl = `https
