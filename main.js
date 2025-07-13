@@ -439,11 +439,11 @@ async function getFormattedPositionData(walletAddress) {
           const feesAPR = (rewardsPerYear / currentPositionInitialPrincipalUSD) * 100;
 
           responseMessage += `\n*Fee Performance*\n`;
-          responseMessage += `💰 Fees per hour: $${rewardsPerHour.toFixed(2)}\n`;
-          responseMessage += `💰 Fees per day: $${rewardsPerDay.toFixed(2)}\n`;
-          responseMessage += `💰 Fees per month: $${rewardsPerMonth.toFixed(2)}\n`;
-          responseMessage += `💰 Fees per year: $${rewardsPerYear.toFixed(2)}\n`;
-          responseMessage += `💰 Fees APR: ${feesAPR.toFixed(2)}%\n`;
+          responseMessage += `💎 Fees per hour: $${rewardsPerHour.toFixed(2)}\n`;
+          responseMessage += `💎 Fees per day: $${rewardsPerDay.toFixed(2)}\n`;
+          responseMessage += `💎 Fees per month: $${rewardsPerMonth.toFixed(2)}\n`;
+          responseMessage += `💎 Fees per year: $${rewardsPerYear.toFixed(2)}\n`;
+          responseMessage += `💎 Fees APR: ${feesAPR.toFixed(2)}%\n`;
       } else {
           responseMessage += `\n⚠️ Could not determine per-position fee performance (initial investment unknown or zero).\n`;
       }
@@ -492,7 +492,7 @@ async function getFormattedPositionData(walletAddress) {
 
         // Corrected All time gains: Principal return + Total Fees Earned
         const allTimeGains = totalReturn + totalFeeUSD; 
-        responseMessage += `\n🏦 Total return: $${allTimeGains.toFixed(2)}\n`; // Changed text
+        responseMessage += `\n📈 Total return: $${allTimeGains.toFixed(2)}\n`; // Changed text
 
         // Removed: Overall Performance heading and Total APR (incl. price changes) line
         // If you need the overall APR for the total value (principal + fees) again, re-add this explicitly.
