@@ -1,42 +1,25 @@
-// --- VERY EARLY DEBUG LOG ---
-console.log('DEBUG: Script started. Attempting initial module imports and config setup.');
-
 // --- Import necessary modules ---
 const { ethers } = require("ethers");
 const express = require('express');
 const bodyParser = require('body-parser');
-const fetch = (...args) => {
-  // DEBUG: Log node-fetch import attempt
-  console.log('DEBUG: Attempting to import node-fetch dynamically.');
-  return import('node-fetch').then(({ default: fetch }) => {
-    console.log('DEBUG: node-fetch imported successfully.');
-    return fetch(...args);
-  }).catch(e => {
-    console.error(`FATAL ERROR: Failed to import node-fetch: ${e.message}`);
-    throw e; // Re-throw to propagate critical error
-  });
-};
+const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
 // --- Configuration from Environment Variables ---
-console.log('DEBUG: Loading environment variables.');
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const CHAT_ID = process.env.CHAT_ID;
 const RENDER_WEBHOOK_URL = process.env.RENDER_WEBHOOK_URL;
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
-console.log(`DEBUG: Env vars loaded. RENDER_WEBHOOK_URL: ${RENDER_WEBHOOK_URL ? RENDER_WEBHOOK_URL.substring(0, 30) + '...' : 'N/A'}`); // Log partially for security
 
 // --- Ethers.js Provider and Contract Addresses ---
-console.log('DEBUG: Setting up Ethers.js provider and contract addresses.');
 const provider = new ethers.JsonRpcProvider("https://base.publicnode.com");
-console.log('DEBUG: Ethers.js provider initialized.');
 
 const managerAddress = "0x03a520b32c04bf3beef7beb72e919cf822ed34f1";
 const myAddress = "0x2FD24cC510b7a40b176B05A5Bb628d024e3B6886";
-const factoryAddress = "0x33128a8fc17869b8dceb626f79ceefbeed336b3b"; 
-console.log('DEBUG: Contract addresses defined.');
+
+// Uniswap V3 Factory Address on Base (You can find this on Chainlist.org or Uniswap V3 docs)
+const factoryAddress = "0x33128a8fc17869b8dceb626f79ceefbeed336b3b"; // Uniswap V3 Factory on Base
 
 // --- ABIs ---
-console.log('DEBUG: Defining ABIs.');
 const managerAbi = [
   "function balanceOf(address owner) view returns (uint256)",
   "function tokenOfOwnerByIndex(address owner, uint256 index) view returns (uint256)",
@@ -83,9 +66,8 @@ const erc20Abi = [
 
 const UINT128_MAX = "340282366920938463463374607431768211455";
 const { formatUnits } = ethers;
-console.log('DEBUG: ABIs and ethers utils defined.');
 
-// --- Utility Functions (All functions defined at the top-level for global access) ---
+// --- Utility Functions ---
 
 // Helper to escape markdown characters for Telegram messages
 function escapeMarkdown(text) {
@@ -359,7 +341,8 @@ async function getFormattedPositionData(walletAddress) {
       console.log(`DEBUG: Token ID: ${tokenId.toString()}`);
       responseMessage += `🔹 Token ID: \`${tokenId.toString()}\`\n`;
       
-      const pos = await manager.positions(tokenId);
+      console.log(`DEBUG: Calling manager.positions(${tokenId})`);
+      const pos = await manager.positions(tokenId); // ERROR POINT
       console.log(`DEBUG: Position details fetched for tokenId ${tokenId}. pos.token0: ${pos.token0}, pos.token1: ${pos.token1}, pos.fee: ${pos.fee}`);
 
       const [t0, t1] = await Promise.all([
@@ -369,9 +352,28 @@ async function getFormattedPositionData(walletAddress) {
       console.log(`DEBUG: Token metadata fetched for pool tokens.`);
 
       // Dynamically get pool address for this specific NFT's token0, token1, and fee tier
-      console.log(`DEBUG: Getting pool address via factory for ${t0.symbol}/${t1.symbol} fee: ${pos.fee}`);
-      const currentNFTPoolAddress = await factory.getPool(pos.token0, pos.token1, pos.fee);
-      console.log(`DEBUG: Pool address found: ${currentNFTPoolAddress}`);
+      console.log(`DEBUG: Getting pool address via factory for ${t0.symbol}/${t1.symbol} fee: ${pos.fee}. Original token order: ${pos.token0}, ${pos.token1}`);
+      
+      // Sort token addresses for getPool as required by Uniswap V3 Factory
+      let tokenA = pos.token0;
+      let tokenB = pos.token1;
+      if (tokenA.toLowerCase() > tokenB.toLowerCase()) { // Sort lexicographically
+          [tokenA, tokenB] = [tokenB, tokenA];
+          console.log(`DEBUG: Tokens sorted for getPool: ${tokenA}, ${tokenB}`);
+      }
+
+      let currentNFTPoolAddress;
+      try {
+          currentNFTPoolAddress = await factory.getPool(tokenA, tokenB, pos.fee);
+          if (currentNFTPoolAddress === ethers.ZeroAddress) {
+              throw new Error(`Factory returned zero address for pool ${t0.symbol}/${t1.symbol} fee ${pos.fee}. Pool might not exist.`);
+          }
+          console.log(`DEBUG: Pool address found: ${currentNFTPoolAddress}`);
+      } catch (e) {
+          console.error(`ERROR: Failed to get pool address from factory for ${t0.symbol}/${t1.symbol} fee ${pos.fee}: ${e.message}`);
+          responseMessage += `⚠️ Could not determine pool address: ${escapeMarkdown(e.message)}\n`;
+          continue; // Skip this position if pool address cannot be found
+      }
       
       // Instantiate a new pool contract for this specific NFT's pool
       const currentNFTPool = new ethers.Contract(currentNFTPoolAddress, poolAbi, provider);
