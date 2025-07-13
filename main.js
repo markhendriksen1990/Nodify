@@ -361,7 +361,7 @@ async function getFormattedPositionData(walletAddress) {
 
 
         responseMessage += `📅 Created: ${currentPositionStartDate.toISOString().replace('T', ' ').slice(0, 19)}\n`;
-        responseMessage += `💰 Initial Investment: $${currentPositionInitialPrincipalUSD.toFixed(2)}\n`; 
+        responseMessage += `🏛 Initial Investment: $${currentPositionInitialPrincipalUSD.toFixed(2)}\n`; 
       } catch (error) {
         responseMessage += `⚠️ Could not analyze position history: ${escapeMarkdown(error.message)}\n`; // Escaped error message
       }
@@ -373,7 +373,7 @@ async function getFormattedPositionData(walletAddress) {
 
       responseMessage += `\n📊 *Price Information*\n`;
       // Removed: responseMessage += `🏷️ Tick Range: \`[${pos.tickLower}, ${pos.tickUpper}]\`\n`;
-      responseMessage += `Range: $${lowerPrice.toFixed(2)} - $${upperPrice.toFixed(2)} ${t1.symbol}/${t0.symbol}\n`; // Changed "Price Range" to "Range"
+      responseMessage += `🏷️ Range: $${lowerPrice.toFixed(2)} - $${upperPrice.toFixed(2)} ${t1.symbol}/${t0.symbol}\n`; // Changed "Price Range" to "Range"
       // Removed: responseMessage += `🌐 Current Tick: \`${nativeTick}\`\n`;
       responseMessage += `🌐 Current Price: $${currentPrice.toFixed(2)} ${t1.symbol}/${t0.symbol}\n`; // 2 decimals
       
@@ -403,11 +403,11 @@ async function getFormattedPositionData(walletAddress) {
 
       const ratio = getRatio(amtWETH * prices.WETH, amtUSDC * prices.USDC);
 
-      responseMessage += `\n💧 *Current Position Holdings*\n`;
-      responseMessage += `💧 ${formatTokenAmount(amtWETH, 6)} WETH ($${(amtWETH * prices.WETH).toFixed(2)})\n`;
-      responseMessage += `💧 ${formatTokenAmount(amtUSDC, 2)} USDC ($${(amtUSDC * prices.USDC).toFixed(2)})\n`;
-      responseMessage += `💧 Ratio: WETH/USDC ${ratio.weth}/${ratio.usdc}%\n`;
-      responseMessage += `💧 Holdings: *$${principalUSD.toFixed(2)}*\n`; // Changed to Holdings
+      responseMessage += `\n*Current Holdings*\n`;
+      responseMessage += `🏛 ${formatTokenAmount(amtWETH, 6)} WETH ($${(amtWETH * prices.WETH).toFixed(2)})\n`;
+      responseMessage += `🏛 ${formatTokenAmount(amtUSDC, 2)} USDC ($${(amtUSDC * prices.USDC).toFixed(2)})\n`;
+      responseMessage += `🏛 Ratio: WETH/USDC ${ratio.weth}/${ratio.usdc}%\n`;
+      responseMessage += `🏛 Holdings: *$${principalUSD.toFixed(2)}*\n`; // Changed to Holdings
 
       // Uncollected fees analysis
       const xp = await manager.collect.staticCall({
@@ -423,7 +423,7 @@ async function getFormattedPositionData(walletAddress) {
       const feeUSD1 = fee1 * (t1.symbol.toUpperCase() === "WETH" ? prices.WETH : prices.USDC);
       const totalPositionFeesUSD = feeUSD0 + feeUSD1;
 
-      responseMessage += `\n💰 *Uncollected Fees*\n`;
+      responseMessage += `\n*Uncollected Fees*\n`;
       responseMessage += `💰 ${formatTokenAmount(fee0, 6)} ${t0.symbol} ($${feeUSD0.toFixed(2)})\n`;
       responseMessage += `💰 ${formatTokenAmount(fee1, 2)} ${t1.symbol} ($${feeUSD1.toFixed(2)})\n`;
       responseMessage += `💰 Total Fees: *$${totalPositionFeesUSD.toFixed(2)}*\n`;
@@ -438,12 +438,12 @@ async function getFormattedPositionData(walletAddress) {
           const rewardsPerYear = rewardsPerDay * 365.25;
           const feesAPR = (rewardsPerYear / currentPositionInitialPrincipalUSD) * 100;
 
-          responseMessage += `\n📊 *Fee Performance (This Position)*\n`;
-          responseMessage += `💎 Fees per hour: $${rewardsPerHour.toFixed(2)}\n`;
-          responseMessage += `💎 Fees per day: $${rewardsPerDay.toFixed(2)}\n`;
-          responseMessage += `💎 Fees per month: $${rewardsPerMonth.toFixed(2)}\n`;
-          responseMessage += `💎 Fees per year: $${rewardsPerYear.toFixed(2)}\n`;
-          responseMessage += `💎 Fees APR: ${feesAPR.toFixed(2)}%\n`;
+          responseMessage += `\n*Fee Performance*\n`;
+          responseMessage += `💰 Fees per hour: $${rewardsPerHour.toFixed(2)}\n`;
+          responseMessage += `💰 Fees per day: $${rewardsPerDay.toFixed(2)}\n`;
+          responseMessage += `💰 Fees per month: $${rewardsPerMonth.toFixed(2)}\n`;
+          responseMessage += `💰 Fees per year: $${rewardsPerYear.toFixed(2)}\n`;
+          responseMessage += `💰 Fees APR: ${feesAPR.toFixed(2)}%\n`;
       } else {
           responseMessage += `\n⚠️ Could not determine per-position fee performance (initial investment unknown or zero).\n`;
       }
@@ -456,7 +456,7 @@ async function getFormattedPositionData(walletAddress) {
       const positionReturn = principalUSD - currentPositionInitialPrincipalUSD; // Principal gain/loss for this position
       const positionTotalGains = positionReturn + totalPositionFeesUSD; // Total gain including fees for this position
       if (positionHistoryAnalysisSucceeded && currentPositionInitialPrincipalUSD > 0) {
-          responseMessage += `💲 Position Total return + Fees: $${positionTotalGains.toFixed(2)}\n`;
+          responseMessage += `📈 Position Total return + Fees: $${positionTotalGains.toFixed(2)}\n`;
       }
 
 
@@ -481,18 +481,18 @@ async function getFormattedPositionData(walletAddress) {
 
         responseMessage += `\n=== *OVERALL PORTFOLIO PERFORMANCE* ===\n`;
         // Removed: Oldest Position and Analysis Period lines
-        responseMessage += `💰 Initial Investment: $${startPrincipalUSD.toFixed(2)}\n`;
-        responseMessage += `💰 Current Value: $${totalPortfolioPrincipalUSD.toFixed(2)}\n`; // Use totalPortfolioPrincipalUSD
-        responseMessage += `💰 Total Return: $${totalReturn.toFixed(2)} (${totalReturnPercent.toFixed(2)}%)\n`;
+        responseMessage += `🏛 Initial Investment: $${startPrincipalUSD.toFixed(2)}\n`;
+        responseMessage += `🏛 Total holdings: $${totalPortfolioPrincipalUSD.toFixed(2)}\n`; // Use totalPortfolioPrincipalUSD
+        responseMessage += `🏛 Holdings Return: $${totalReturn.toFixed(2)} (${totalReturnPercent.toFixed(2)}%)\n`;
         
-        responseMessage += `\n📊 *Fee Performance*\n`;
-        responseMessage += `💎 Total Fees Earned: $${totalFeeUSD.toFixed(2)}\n`;
+        responseMessage += `\n*Fee Performance*\n`;
+        responseMessage += `💰 Total Fees Earned: $${totalFeeUSD.toFixed(2)}\n`;
         // Removed: Fees per hour/day/month/year lines
-        responseMessage += `💎 Fees APR: ${feesAPR.toFixed(2)}%\n`;
+        responseMessage += `💰 Fees APR: ${feesAPR.toFixed(2)}%\n`;
 
         // Corrected All time gains: Principal return + Total Fees Earned
         const allTimeGains = totalReturn + totalFeeUSD; 
-        responseMessage += `\n💲 All time Total return + Fees: $${allTimeGains.toFixed(2)}\n`; // Changed text
+        responseMessage += `\n🏦 Total return: $${allTimeGains.toFixed(2)}\n`; // Changed text
 
         // Removed: Overall Performance heading and Total APR (incl. price changes) line
         // If you need the overall APR for the total value (principal + fees) again, re-add this explicitly.
