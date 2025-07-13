@@ -14,14 +14,17 @@ const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 const provider = new ethers.JsonRpcProvider("https://base.publicnode.com");
 
 const managerAddress = "0x03a520b32c04bf3beef7beb72e919cf822ed34f1";
-const poolAddress = "0xd0b53D9277642d899DF5C87A3966A349A798F224";
+// Removed hardcoded poolAddress, it will be derived dynamically per NFT
+// const poolAddress = "0xd0b53D9277642d899DF5C87A3966A349A798F224"; 
 const myAddress = "0x2FD24cC510b7a40b176B05A5Bb628d024e3B6886";
+
+// Uniswap V3 Factory Address on Base (You can find this on Chainlist.org or Uniswap V3 docs)
+const factoryAddress = "0x33128a8fc17869b8dceb626f79ceefbeed336b3b"; // Uniswap V3 Factory on Base
 
 // --- ABIs ---
 const managerAbi = [
   "function balanceOf(address owner) view returns (uint256)",
   "function tokenOfOwnerByIndex(address owner, uint256 index) view returns (uint256)",
-  // Corrected 'positions' function signature. This is the canonical signature.
   "function positions(uint256 tokenId) view returns (uint96 nonce, address operator, address token0, address token1, uint24 fee, int24 tickLower, int24 tickUpper, uint128 liquidity, uint256 feeGrowthInside0LastX128, uint256 feeGrowthInside1LastX128, uint128 tokensOwed0, uint128 tokensOwed1)",
   "event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)",
   "function collect(tuple(uint256 tokenId, address recipient, uint128 amount0Max, uint128 amount1Max)) external returns (uint256 amount0, uint256 amount1)"
@@ -31,6 +34,11 @@ const poolAbi = [
   "function slot0() external view returns (uint160 sqrtPriceX96,int24 tick,uint16 observationIndex,uint16 observationCardinality,uint16 observationCardinalityNext,uint8 feeProtocol,bool unlocked)",
   "function token0() view returns (address)",
   "function token1() view returns (address)"
+];
+
+// ABI for Uniswap V3 Factory to get pool address
+const factoryAbi = [
+  "function getPool(address tokenA, address tokenB, uint24 fee) view returns (address pool)"
 ];
 
 const erc20Abi = [
@@ -267,24 +275,18 @@ async function getFormattedPositionData(walletAddress) {
     prices = await getUsdPrices(); 
 
     const manager = new ethers.Contract(managerAddress, managerAbi, provider);
-    const pool = new ethers.Contract(poolAddress, poolAbi, provider);
+    // Removed hardcoded poolAddress initialization from here
+    // const pool = new ethers.Contract(poolAddress, poolAbi, provider); 
 
-    const [balance, slot0, token0Addr, token1Addr] = await Promise.all([
-      manager.balanceOf(walletAddress),
-      pool.slot0(),
-      pool.token0(),
-      pool.token1()
-    ]);
-    const sqrtP = slot0[0];
-    const nativeTick = slot0[1];
+    // Instantiate Uniswap V3 Factory contract
+    const factory = new ethers.Contract(factoryAddress, factoryAbi, provider);
 
-    const [poolT0, poolT1] = await Promise.all([
-      getTokenMeta(token0Addr),
-      getTokenMeta(token1Addr)
+    const [balance] = await Promise.all([
+      manager.balanceOf(walletAddress)
     ]);
 
     responseMessage += `*👜 Wallet: ${walletAddress.substring(0, 6)}...${walletAddress.substring(38)}*\n\n`;
-    responseMessage += `✨ You own *${balance.toString()}* position(s) in ${poolT0.symbol}/${poolT1.symbol} pool\n`;
+    responseMessage += `✨ You own *${balance.toString()}* position(s) in Uniswap V3 pools\n`; // Generalize pool type
 
     if (balance === 0n) {
       return responseMessage;
@@ -300,12 +302,28 @@ async function getFormattedPositionData(walletAddress) {
       responseMessage += `\n--- *Position #${i.toString()}* ---\n`;
       const tokenId = await manager.tokenOfOwnerByIndex(walletAddress, i);
       responseMessage += `🔹 Token ID: \`${tokenId.toString()}\`\n`;
+      
       const pos = await manager.positions(tokenId);
       const [t0, t1] = await Promise.all([
         getTokenMeta(pos.token0),
         getTokenMeta(pos.token1)
       ]);
-      responseMessage += `🔸 Pool: ${t0.symbol}/${t1.symbol}\n`;
+
+      // Dynamically get pool address for this specific NFT's token0, token1, and fee tier
+      const currentNFTPoolAddress = await factory.getPool(pos.token0, pos.token1, pos.fee);
+      
+      // Instantiate a new pool contract for this specific NFT's pool
+      const currentNFTPool = new ethers.Contract(currentNFTPoolAddress, poolAbi, provider);
+      
+      // Get slot0 data for this specific pool
+      const slot0 = await currentNFTPool.slot0();
+      const sqrtP = slot0[0];
+      const nativeTick = slot0[1];
+
+
+      responseMessage += `🔸 Pool: ${t0.symbol}/${t1.symbol} (${(Number(pos.fee) / 10000).toFixed(2)}%)`; // Add fee tier to pool display
+      responseMessage += `\n🔸 Pool Address: \`${currentNFTPoolAddress}\`\n`; // Display pool address for verification
+
 
       let currentPositionStartDate = null;
       let currentPositionInitialPrincipalUSD = 0; 
@@ -415,7 +433,7 @@ async function getFormattedPositionData(walletAddress) {
       }
 
 
-      // Uncollected fees analysis
+      // Uncollected Fees analysis
       const xp = await manager.collect.staticCall({
         tokenId,
         recipient: walletAddress,
@@ -432,7 +450,8 @@ async function getFormattedPositionData(walletAddress) {
       responseMessage += `\n*Uncollected Fees*\n`; // Removed icon
       responseMessage += `💰 ${formatTokenAmount(fee0, 6)} ${t0.symbol} ($${feeUSD0.toFixed(2)})\n`;
       responseMessage += `💰 ${formatTokenAmount(fee1, 2)} ${t1.symbol} ($${feeUSD1.toFixed(2)})\n`;
-      responseMessage += `💰 Total Fees: *$${totalPositionFeesUSD.toFixed(2)}*\n`;
+      responseMessage += `💰 Total Fees: *$${totalPositionFeesUSD.toFixed(2)}*\n`; // Add Total Fees to Uncollected Fees
+
 
       // Per-Position Fee Performance (uses currentPositionStartDate and currentPositionInitialPrincipalUSD)
       if (positionHistoryAnalysisSucceeded && currentPositionInitialPrincipalUSD !== null && currentPositionInitialPrincipalUSD > 0) {
@@ -445,11 +464,11 @@ async function getFormattedPositionData(walletAddress) {
           const feesAPR = (rewardsPerYear / currentPositionInitialPrincipalUSD) * 100;
 
           responseMessage += `\n*Fee Performance*\n`; // Removed icon
-          responseMessage += `💧 Fees/hour: $${rewardsPerHour.toFixed(2)}\n`;
-          responseMessage += `💧 Fees/day: $${rewardsPerDay.toFixed(2)}\n`;
-          responseMessage += `💧 Fees/month: $${rewardsPerMonth.toFixed(2)}\n`;
-          responseMessage += `💧 Fees/year: $${rewardsPerYear.toFixed(2)}\n`;
-          responseMessage += `💧 Fees APR: ${feesAPR.toFixed(2)}%\n`;
+          responseMessage += `💎 Fees per hour: $${rewardsPerHour.toFixed(2)}\n`; // Added diamond icon
+          responseMessage += `💎 Fees per day: $${rewardsPerDay.toFixed(2)}\n`; // Added diamond icon
+          responseMessage += `💎 Fees per month: $${rewardsPerMonth.toFixed(2)}\n`; // Added diamond icon
+          responseMessage += `💎 Fees per year: $${rewardsPerYear.toFixed(2)}\n`; // Added diamond icon
+          responseMessage += `💎 Fees APR: ${feesAPR.toFixed(2)}%\n`; // Added diamond icon
       } else {
           responseMessage += `\n⚠️ Could not determine per-position fee performance (initial investment unknown or zero).\n`;
       }
@@ -458,7 +477,6 @@ async function getFormattedPositionData(walletAddress) {
       responseMessage += `\n🏦 Position Value: *$${currentTotalValue.toFixed(2)}*\n`; // Changed to Position Value
 
       // NEW: Position Total return + Fees
-      // This calculates the return + fees for this specific position
       const positionReturn = principalUSD - currentPositionInitialPrincipalUSD; // Principal gain/loss for this position
       const positionTotalGains = positionReturn + totalPositionFeesUSD; // Total gain including fees for this position
       if (positionHistoryAnalysisSucceeded && currentPositionInitialPrincipalUSD > 0) {
@@ -489,16 +507,16 @@ async function getFormattedPositionData(walletAddress) {
         // Removed: Oldest Position and Analysis Period lines
         responseMessage += `🏛 Initial Investment: $${startPrincipalUSD.toFixed(2)}\n`;
         responseMessage += `🏛 Total Holdings: $${totalPortfolioPrincipalUSD.toFixed(2)}\n`; // Use totalPortfolioPrincipalUSD
-        responseMessage += `📈 Holdings Change: $${totalReturn.toFixed(2)} (${totalReturnPercent.toFixed(2)}%)\n`; // Changed to Holdings Return
+        responseMessage += `📈 Holdings Return: $${totalReturn.toFixed(2)} (${totalReturnPercent.toFixed(2)}%)\n`; // Changed to Holdings Return
         
         responseMessage += `\n*Fee Performance*\n`; // Removed icon
-        responseMessage += `📈 Total Fees Earned: $${totalFeeUSD.toFixed(2)}\n`;
+        responseMessage += `💰 Total Fees Earned: $${totalFeeUSD.toFixed(2)}\n`;
         // Removed: Fees per hour/day/month/year lines
-        responseMessage += `💰 Fees APR: ${feesAPR.toFixed(2)}%\n`;
+        responseMessage += `💎 Fees APR: ${feesAPR.toFixed(2)}%\n`; // Added diamond icon
 
         // Corrected All time gains: Principal return + Total Fees Earned
         const allTimeGains = totalReturn + totalFeeUSD; 
-        responseMessage += `\n📈 Total return + Fees: $${allTimeGains.toFixed(2)}\n`; // Changed text
+        responseMessage += `\n📈 Total return + Fees: $${allTimeGains.toFixed(2)}\n`; // Changed text and icon
 
         // Removed: Overall Performance heading and Total APR (incl. price changes) line
         // If you need the overall APR for the total value (principal + fees) again, re-add this explicitly.
