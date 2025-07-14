@@ -11,9 +11,9 @@
     "express": "^4.x.x",
     "body-parser": "^1.x.x",
     "node-fetch": "^3.x.x",
-    "@uniswap/v3-sdk": "^1.13.0",
-    "@uniswap/sdk-core": "^4.0.0",
-    "jsbi": "^4.3.0"
+    "@uniswap/v3-sdk": "latest",
+    "@uniswap/sdk-core": "latest",
+    "jsbi": "latest"
   },
   "keywords": [],
   "author": "",
