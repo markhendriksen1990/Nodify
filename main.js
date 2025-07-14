@@ -23,7 +23,7 @@ const provider = new ethers.JsonRpcProvider("https://base-mainnet.infura.io/v3/c
 const managerAddress = "0x03a520b32c04bf3beef7beb72e919cf822ed34f1";
 const myAddress = "0x2FD24cC510b7a40b176B05A5Bb628d024e3B6886";
 
-// Uniswap V3 Factory Address (No longer needed to call getPool directly, as we use Pool.getAddress off-chain)
+// Uniswap V3 Factory Address (No longer needed to call getPool directly, but keep Factory ABI for completeness if any other Factory methods are used)
 const factoryAddress = "0x33128a8fc17869b8dceb626f79ceefbeed336b3b"; 
 
 // --- ABIs ---
@@ -62,10 +62,11 @@ const poolAbi = [
   "function token1() view returns (address)"
 ];
 
-const factoryAbi = [ // Keep factory ABI for completeness, if you use other factory methods
+const factoryAbi = [
   "function getPool(address tokenA, address tokenB, uint24 fee) view returns (address pool)"
 ];
 
+// MODIFIED: erc20Abi to include the 'name()' function signature
 const erc20Abi = [
   "function symbol() view returns (string)",
   "function decimals() view returns (uint8)",
@@ -395,8 +396,7 @@ async function getFormattedPositionData(walletAddress) {
               continue; // Skip this position if fee tier is not supported
       }
 
-      // Create Token instances for the SDK. Ensure symbol and name are always strings.
-      // Pass ChainId.BASE for the chainId
+      // Create Token instances for the SDK. Ensure symbol and name are always strings and addresses are checksummed.
       const token0SDK = new Token(
           ChainId.BASE, // Use ChainId.BASE enum (8453)
           ethers.getAddress(t0.address), // Checksum address
@@ -414,8 +414,7 @@ async function getFormattedPositionData(walletAddress) {
 
       let currentNFTPoolAddress;
       try {
-          // Pool.getAddress expects tokens to be sorted by address, even if the factory doesn't.
-          // The SDK internally sorts them for Pool.getAddress if needed.
+          // The SDK internally sorts tokens for Pool.getAddress if needed.
           currentNFTPoolAddress = Pool.getAddress(token0SDK, token1SDK, feeAmountEnum); 
           
           if (currentNFTPoolAddress === ethers.ZeroAddress) { 
