@@ -6,7 +6,7 @@ const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fet
 
 // Import Uniswap SDK components
 const { Pool, FeeAmount } = require('@uniswap/v3-sdk');
-const { Token, WETH9, CurrencyAmount } = require('@uniswap/sdk-core'); 
+const { Token, WETH9, CurrencyAmount, ChainId } = require('@uniswap/sdk-core'); // ADDED ChainId import
 const JSBI = require('jsbi'); 
 
 
@@ -66,11 +66,10 @@ const factoryAbi = [
   "function getPool(address tokenA, address tokenB, uint24 fee) view returns (address pool)"
 ];
 
-// MODIFIED: erc20Abi to include the 'name()' function signature
 const erc20Abi = [
   "function symbol() view returns (string)",
   "function decimals() view returns (uint8)",
-  "function name() view returns (string)" // Added 'name()' function
+  "function name() view returns (string)" 
 ];
 
 const UINT128_MAX = "340282366920938463463374607431768211455";
@@ -120,21 +119,21 @@ async function getTokenMeta(addr) {
   try {
     const t = new ethers.Contract(addr, erc20Abi, provider);
     const [fetchedSymbol, fetchedDecimals, fetchedName] = await Promise.all([
-        t.symbol().catch(() => null), // Catch errors, default to null
-        t.decimals().catch(() => null), // Catch errors, default to null
-        t.name().catch(() => null) // Catch errors, default to null
+        t.symbol().catch(() => null), 
+        t.decimals().catch(() => null), 
+        t.name().catch(() => null) 
     ]); 
 
     // Ensure symbol and name are non-empty strings, and decimals is a number
     const symbol = fetchedSymbol && typeof fetchedSymbol === 'string' && fetchedSymbol.length > 0 ? fetchedSymbol : "UNKNOWN";
     const decimals = fetchedDecimals !== null ? fetchedDecimals : 18;
-    const name = fetchedName && typeof fetchedName === 'string' && fetchedName.length > 0 ? fetchedName : symbol; // Fallback name to symbol if fetchedName is null/empty
+    const name = fetchedName && typeof fetchedName === 'string' && fetchedName.length > 0 ? fetchedName : symbol; 
 
     console.log(`DEBUG: Token meta fetched - Symbol: ${symbol}, Decimals: ${decimals}, Name: ${name}`);
     return { symbol, decimals, address: addr, name: name };
   } catch(e) {
     console.error(`ERROR: Failed to get token meta for ${addr}: ${e.message}`);
-    return { symbol: "UNKNOWN", decimals: 18, address: addr, name: "UNKNOWN" }; // Fallback with name
+    return { symbol: "UNKNOWN", decimals: 18, address: addr, name: "UNKNOWN" };
   }
 }
 
@@ -415,9 +414,13 @@ async function getFormattedPositionData(walletAddress) {
 
       let currentNFTPoolAddress;
       try {
-          currentNFTPoolAddress = Pool.getAddress(token0SDK, token1SDK, feeAmountEnum); // Pass SDK Token objects
+          // Pool.getAddress expects tokens to be sorted by address. Although constructor handles it,
+          // it's good practice to ensure consistency if one token is WETH9 or a special token.
+          // Let's pass the sorted tokenSDK objects based on their address.
+          const sortedTokens = token0SDK.sortsBefore(token1SDK) ? [token0SDK, token1SDK] : [token1SDK, token0SDK];
+          currentNFTPoolAddress = Pool.getAddress(sortedTokens[0], sortedTokens[1], feeAmountEnum);
           
-          if (currentNFTPoolAddress === ethers.ZeroAddress) { // Still check if it computes to zero address
+          if (currentNFTPoolAddress === ethers.ZeroAddress) { 
               throw new Error(`Pool.getAddress computed zero address for pool ${t0.symbol}/${t1.symbol} fee ${pos.fee}. Pool might not exist.`);
           }
           console.log(`DEBUG: Pool address computed off-chain: ${currentNFTPoolAddress}`);
@@ -655,6 +658,7 @@ async function getFormattedPositionData(walletAddress) {
     console.error("Error in getFormattedPositionData:", error);
     responseMessage = `An error occurred while fetching liquidity positions: ${escapeMarkdown(error.message)}. Please try again later.`; 
   }
+  return responseMessage;
 }
 
 // --- Express App Setup for Webhook ---
