@@ -4,12 +4,6 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
-// Import Uniswap SDK components
-const { Pool, FeeAmount } = require('@uniswap/v3-sdk');
-const { Token, WETH9, CurrencyAmount } = require('@uniswap/sdk-core');
-const JSBI = require('jsbi'); // Required by @uniswap/sdk-core for BigInt operations
-
-
 // --- Configuration from Environment Variables ---
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const CHAT_ID = process.env.CHAT_ID;
@@ -23,7 +17,7 @@ const provider = new ethers.JsonRpcProvider("https://base-mainnet.infura.io/v3/c
 const managerAddress = "0x03a520b32c04bf3beef7beb72e919cf822ed34f1";
 const myAddress = "0x2FD24cC510b7a40b176B05A5Bb628d024e3B6886";
 
-// Uniswap V3 Factory Address on Base (Only used for ABI, not getPool directly now)
+// Uniswap V3 Factory Address on Base (You can find this on Chainlist.org or Uniswap V3 docs)
 const factoryAddress = "0x33128a8fc17869b8dceb626f79ceefbeed336b3b"; // Uniswap V3 Factory on Base
 
 // --- ABIs ---
@@ -62,7 +56,7 @@ const poolAbi = [
   "function token1() view returns (address)"
 ];
 
-const factoryAbi = [ // Keep factory ABI for completeness, though getPool is now computed off-chain
+const factoryAbi = [
   "function getPool(address tokenA, address tokenB, uint24 fee) view returns (address pool)"
 ];
 
