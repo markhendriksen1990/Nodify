@@ -4,9 +4,9 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
-// Import Uniswap SDK components (still needed for Token objects, etc.)
+// Import Uniswap SDK components
 const { Pool, FeeAmount } = require('@uniswap/v3-sdk');
-const { Token, WETH9, CurrencyAmount } = require('@uniswap/sdk-core');
+const { Token, WETH9, CurrencyAmount } = require('@uniswap/sdk-core'); 
 const JSBI = require('jsbi'); 
 
 
@@ -23,7 +23,7 @@ const provider = new ethers.JsonRpcProvider("https://base-mainnet.infura.io/v3/c
 const managerAddress = "0x03a520b32c04bf3beef7beb72e919cf822ed34f1";
 const myAddress = "0x2FD24cC510b7a40b176B05A5Bb628d024e3B6886";
 
-// Uniswap V3 Factory Address
+// Uniswap V3 Factory Address 
 const factoryAddress = "0x33128a8fc17869b8dceb626f79ceefbeed336b3b"; 
 
 // --- ABIs ---
@@ -112,16 +112,17 @@ function getAmountsFromLiquidity(liquidity, sqrtPriceX96, sqrtLowerX96, sqrtUppe
   return [amount0, amount1];
 }
 
+// MODIFIED: getTokenMeta to also return token 'name' (using symbol as fallback)
 async function getTokenMeta(addr) {
   console.log(`DEBUG: Fetching meta for token address: ${addr}`);
   try {
     const t = new ethers.Contract(addr, erc20Abi, provider);
-    const [symbol, decimals] = await Promise.all([t.symbol(), t.decimals()]);
-    console.log(`DEBUG: Token meta fetched - Symbol: ${symbol}, Decimals: ${decimals}`);
-    return { symbol, decimals, address: addr };
+    const [symbol, decimals, name] = await Promise.all([t.symbol(), t.decimals(), t.name().catch(() => null)]); // Attempt to get name, fallback to null
+    console.log(`DEBUG: Token meta fetched - Symbol: ${symbol}, Decimals: ${decimals}, Name: ${name}`);
+    return { symbol, decimals, address: addr, name: name || symbol }; // Provide name, using symbol as fallback
   } catch(e) {
     console.error(`ERROR: Failed to get token meta for ${addr}: ${e.message}`);
-    return { symbol: "UNKNOWN", decimals: 18, address: addr };
+    return { symbol: "UNKNOWN", decimals: 18, address: addr, name: "UNKNOWN" }; // Fallback with name
   }
 }
 
@@ -367,38 +368,28 @@ async function getFormattedPositionData(walletAddress) {
       console.log(`DEBUG: Getting pool address off-chain via Uniswap SDK for ${t0.symbol}/${t1.symbol} fee: ${pos.fee}.`);
       
       // Create Token instances for the SDK. They need chainId, address, decimals, symbol, name.
-      // Use sorted token addresses for SDK's Pool.getAddress canonical form if SDK enforces it (it does).
-      const token0Address = t0.address;
-      const token1Address = t1.address;
-      const isToken0First = token0Address.toLowerCase() < token1Address.toLowerCase(); // Determine canonical order
+      // The SDK's Pool.getAddress canonical form expects tokens to be sorted by address internally
+      // but the Token objects themselves should reflect their true identity.
+      // The FeeAmount enum is also required for the SDK.
+      
+      // Map the numerical fee to FeeAmount enum
+      let feeAmountEnum;
+      switch (Number(pos.fee)) {
+          case 500: feeAmountEnum = FeeAmount.LOW; break; // 0.05%
+          case 3000: feeAmountEnum = FeeAmount.MEDIUM; break; // 0.3%
+          case 10000: feeAmountEnum = FeeAmount.HIGH; break; // 1%
+          default:
+              console.warn(`WARN: Unknown fee amount ${pos.fee}. Cannot determine Pool address off-chain.`);
+              responseMessage += `⚠️ Could not determine pool address due to unsupported fee tier: ${pos.fee}\n`;
+              continue; // Skip this position if fee tier is not supported
+      }
 
-      const token0SDK = new Token(
-          network.chainId, // Use chainId from resolved provider network
-          isToken0First ? t0.address : t1.address,
-          isToken0First ? t0.decimals : t1.decimals,
-          isToken0First ? t0.symbol : t1.symbol,
-          isToken0First ? t0.name : t1.name // Assuming t0.name and t1.name exist or are fine
-      );
-      const token1SDK = new Token(
-          network.chainId,
-          isToken0First ? t1.address : t0.address,
-          isToken0First ? t1.decimals : t0.decimals,
-          isToken0First ? t1.symbol : t0.symbol,
-          isToken0First ? t1.name : t0.name
-      );
+      // Create Token instances for the SDK, preserving original token0/token1 identities
+      const token0SDK = new Token(network.chainId, t0.address, t0.decimals, t0.symbol, t0.name);
+      const token1SDK = new Token(network.chainId, t1.address, t1.decimals, t1.symbol, t1.name);
 
       let currentNFTPoolAddress;
       try {
-          // Map the numerical fee to FeeAmount enum
-          let feeAmountEnum;
-          switch (Number(pos.fee)) {
-              case 500: feeAmountEnum = FeeAmount.LOW; break; // 0.05%
-              case 3000: feeAmountEnum = FeeAmount.MEDIUM; break; // 0.3%
-              case 10000: feeAmountEnum = FeeAmount.HIGH; break; // 1%
-              default:
-                  console.warn(`WARN: Unknown fee amount ${pos.fee}. Cannot determine Pool address off-chain.`);
-                  throw new Error(`Unsupported fee tier: ${pos.fee}`);
-          }
           currentNFTPoolAddress = Pool.getAddress(token0SDK, token1SDK, feeAmountEnum); // Pass SDK Token objects
           
           if (currentNFTPoolAddress === ethers.ZeroAddress) { // Still check if it computes to zero address
