@@ -11,7 +11,6 @@ const RENDER_WEBHOOK_URL = process.env.RENDER_WEBHOOK_URL;
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 
 // --- Ethers.js Provider and Contract Addresses ---
-// CORRECTED: Provider URL changed to Base MAINNET Infura endpoint
 const provider = new ethers.JsonRpcProvider("https://base-mainnet.infura.io/v3/cceebb32fc834db39318ba89b48471a1");
 
 
@@ -365,15 +364,31 @@ async function getFormattedPositionData(walletAddress) {
       }
 
       let currentNFTPoolAddress;
-      try {
-          currentNFTPoolAddress = await factory.getPool(tokenA, tokenB, pos.fee);
-          if (currentNFTPoolAddress === ethers.ZeroAddress) {
-              throw new Error(`Factory returned zero address for pool ${t0.symbol}/${t1.symbol} fee ${pos.fee}. Pool might not exist.`);
+      const MAX_GETPOOL_RETRIES = 3; // Max retries for getPool
+      const GETPOOL_RETRY_DELAY = 1000; // Delay in ms between retries
+
+      for (let attempt = 1; attempt <= MAX_GETPOOL_RETRIES; attempt++) {
+          try {
+              console.log(`DEBUG: Attempt ${attempt} for factory.getPool(${tokenA}, ${tokenB}, ${pos.fee})`);
+              currentNFTPoolAddress = await factory.getPool(tokenA, tokenB, pos.fee);
+              if (currentNFTPoolAddress === ethers.ZeroAddress) {
+                  throw new Error(`Factory returned zero address (pool might not exist) on attempt ${attempt}.`);
+              }
+              console.log(`DEBUG: Pool address found on attempt ${attempt}: ${currentNFTPoolAddress}`);
+              break; // Success, exit retry loop
+          } catch (e) {
+              console.error(`ERROR: Failed to get pool address from factory on attempt ${attempt}: ${e.message}`);
+              if (attempt < MAX_GETPOOL_RETRIES) {
+                  console.log(`DEBUG: Retrying getPool in ${GETPOOL_RETRY_DELAY}ms...`);
+                  await new Promise(resolve => setTimeout(resolve, GETPOOL_RETRY_DELAY));
+              } else {
+                  throw new Error(`Max retries exceeded for getPool: ${e.message}`); // Final failure
+              }
           }
-          console.log(`DEBUG: Pool address found: ${currentNFTPoolAddress}`);
-      } catch (e) {
-          console.error(`ERROR: Failed to get pool address from factory for ${t0.symbol}/${t1.symbol} fee ${pos.fee}: ${e.message}`);
-          responseMessage += `⚠️ Could not determine pool address: ${escapeMarkdown(e.message)}\n`;
+      }
+      
+      if (!currentNFTPoolAddress || currentNFTPoolAddress === ethers.ZeroAddress) { // Should be caught by retry loop, but safety check
+          responseMessage += `⚠️ Could not determine pool address after retries.\n`;
           continue; // Skip this position if pool address cannot be found
       }
       
