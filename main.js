@@ -23,8 +23,8 @@ const provider = new ethers.JsonRpcProvider("https://base-mainnet.infura.io/v3/c
 const managerAddress = "0x03a520b32c04bf3beef7beb72e919cf822ed34f1";
 const myAddress = "0x2FD24cC510b7a40b176B05A5Bb628d024e3B6886";
 
-// Uniswap V3 Factory Address on Base (No longer needed to call getPool directly, but keep Factory ABI if any other Factory methods are used)
-const factoryAddress = "0x33128a8fc17869b8dceb626f79ceefbeed336b3b"; // Uniswap V3 Factory on Base
+// Uniswap V3 Factory Address (No longer needed to call getPool directly, but keep Factory ABI for completeness if any other Factory methods are used)
+const factoryAddress = "0x33128a8fc17869b8dceb626f79ceefbeed336b3b"; 
 
 // --- ABIs ---
 const managerAbi = [
@@ -370,31 +370,38 @@ async function getFormattedPositionData(walletAddress) {
       }
 
       let currentNFTPoolAddress;
-      const MAX_GETPOOL_RETRIES = 3; // Max retries for getPool
-      const GETPOOL_RETRY_DELAY = 1000; // Delay in ms between retries
-
-      for (let attempt = 1; attempt <= MAX_GETPOOL_RETRIES; attempt++) {
-          try {
-              console.log(`DEBUG: Attempt ${attempt} for factory.getPool(${tokenA}, ${tokenB}, ${pos.fee})`);
-              currentNFTPoolAddress = await factory.getPool(tokenA, tokenB, pos.fee);
-              if (currentNFTPoolAddress === ethers.ZeroAddress) {
-                  throw new Error(`Factory returned zero address (pool might not exist) on attempt ${attempt}.`);
-              }
-              console.log(`DEBUG: Pool address found on attempt ${attempt}: ${currentNFTPoolAddress}`);
-              break; // Success, exit retry loop
-          } catch (e) {
-              console.error(`ERROR: Failed to get pool address from factory on attempt ${attempt}: ${e.message}`);
-              if (attempt < MAX_GETPOOL_RETRIES) {
-                  console.log(`DEBUG: Retrying getPool in ${GETPOOL_RETRY_DELAY}ms...`);
-                  await new Promise(resolve => setTimeout(resolve, GETPOOL_RETRY_DELAY));
-              } else {
-                  throw new Error(`Max retries exceeded for getPool: ${e.message}`); // Final failure
-              }
+      // Using Pool.getAddress from @uniswap/v3-sdk for off-chain computation
+      try {
+          // Determine the FeeAmount enum from the numerical fee
+          let feeAmountEnum;
+          switch (Number(pos.fee)) {
+              case 500: feeAmountEnum = FeeAmount.LOW; break; // 0.05%
+              case 3000: feeAmountEnum = FeeAmount.MEDIUM; break; // 0.3%
+              case 10000: feeAmountEnum = FeeAmount.HIGH; break; // 1%
+              default:
+                  console.warn(`WARN: Unknown fee amount ${pos.fee}. Cannot determine Pool address off-chain.`);
+                  throw new Error(`Unsupported fee tier: ${pos.fee}`);
           }
-      }
-      
-      if (!currentNFTPoolAddress || currentNFTPoolAddress === ethers.ZeroAddress) { // Should be caught by retry loop, but safety check
-          responseMessage += `⚠️ Could not determine pool address after retries.\n`;
+
+          // Create Token instances for the SDK
+          const token0SDK = new Token(provider.network.chainId, t0.address, t0.decimals, t0.symbol, t0.name);
+          const token1SDK = new Token(provider.network.chainId, t1.address, t1.decimals, t1.symbol, t1.name);
+
+          // Get the pool address off-chain
+          currentNFTPoolAddress = Pool.getAddress(
+              token0SDK,
+              token1SDK,
+              feeAmountEnum
+          );
+          console.log(`DEBUG: Pool address computed off-chain: ${currentNFTPoolAddress}`);
+
+          if (currentNFTPoolAddress === ethers.ZeroAddress) { // Still check if it computes to zero address
+              throw new Error(`Pool.getAddress computed zero address for pool ${t0.symbol}/${t1.symbol} fee ${pos.fee}. Pool might not exist.`);
+          }
+          
+      } catch (e) {
+          console.error(`ERROR: Failed to compute pool address off-chain for ${t0.symbol}/${t1.symbol} fee ${pos.fee}: ${e.message}`);
+          responseMessage += `⚠️ Could not determine pool address: ${escapeMarkdown(e.message)}\n`;
           continue; // Skip this position if pool address cannot be found
       }
       
