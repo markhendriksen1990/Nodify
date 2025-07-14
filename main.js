@@ -114,19 +114,24 @@ function getAmountsFromLiquidity(liquidity, sqrtPriceX96, sqrtLowerX96, sqrtUppe
   return [amount0, amount1];
 }
 
-// MODIFIED: getTokenMeta to also return token 'name' (using symbol as fallback)
+// MODIFIED: getTokenMeta to ensure symbol and name are always non-empty strings
 async function getTokenMeta(addr) {
   console.log(`DEBUG: Fetching meta for token address: ${addr}`);
   try {
     const t = new ethers.Contract(addr, erc20Abi, provider);
-    // Directly get name, symbol, decimals in parallel
-    const [symbol, decimals, name] = await Promise.all([
-        t.symbol(), 
-        t.decimals(), 
-        t.name().catch(() => null) // .catch() handles cases where name() might revert or not exist
+    const [fetchedSymbol, fetchedDecimals, fetchedName] = await Promise.all([
+        t.symbol().catch(() => null), // Catch errors, default to null
+        t.decimals().catch(() => null), // Catch errors, default to null
+        t.name().catch(() => null) // Catch errors, default to null
     ]); 
+
+    // Ensure symbol and name are non-empty strings, and decimals is a number
+    const symbol = fetchedSymbol && typeof fetchedSymbol === 'string' && fetchedSymbol.length > 0 ? fetchedSymbol : "UNKNOWN";
+    const decimals = fetchedDecimals !== null ? fetchedDecimals : 18;
+    const name = fetchedName && typeof fetchedName === 'string' && fetchedName.length > 0 ? fetchedName : symbol; // Fallback name to symbol if fetchedName is null/empty
+
     console.log(`DEBUG: Token meta fetched - Symbol: ${symbol}, Decimals: ${decimals}, Name: ${name}`);
-    return { symbol, decimals, address: addr, name: name || symbol }; // Provide name, using symbol as fallback
+    return { symbol, decimals, address: addr, name: name };
   } catch(e) {
     console.error(`ERROR: Failed to get token meta for ${addr}: ${e.message}`);
     return { symbol: "UNKNOWN", decimals: 18, address: addr, name: "UNKNOWN" }; // Fallback with name
@@ -394,7 +399,7 @@ async function getFormattedPositionData(walletAddress) {
       // Create Token instances for the SDK. Ensure symbol and name are always strings.
       // The SDK handles sorting of these Token objects internally for Pool.getAddress.
       const token0SDK = new Token(
-          network.chainId, 
+          network.chainId, // Use chainId from resolved provider network
           t0.address, 
           t0.decimals, 
           t0.symbol, 
