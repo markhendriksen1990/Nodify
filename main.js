@@ -6,7 +6,7 @@ const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fet
 
 // Import Uniswap SDK components
 const { Pool, FeeAmount } = require('@uniswap/v3-sdk');
-const { Token, WETH9, CurrencyAmount, ChainId } = require('@uniswap/sdk-core'); // ChainId is imported
+const { Token, WETH9, CurrencyAmount, ChainId } = require('@uniswap/sdk-core'); 
 const JSBI = require('jsbi'); 
 
 
@@ -120,9 +120,9 @@ async function getTokenMeta(addr) {
   try {
     const t = new ethers.Contract(addr, erc20Abi, provider);
     const [fetchedSymbol, fetchedDecimals, fetchedName] = await Promise.all([
-        t.symbol().catch(() => null), 
-        t.decimals().catch(() => null), 
-        t.name().catch(() => null) 
+        t.symbol().catch(() => null), // Catch errors, default to null
+        t.decimals().catch(() => null), // Catch errors, default to null
+        t.name().catch(() => null) // Catch errors, default to null
     ]); 
 
     // Ensure symbol and name are non-empty strings, and decimals is a number
@@ -396,17 +396,17 @@ async function getFormattedPositionData(walletAddress) {
               continue; // Skip this position if fee tier is not supported
       }
 
-      // MODIFIED: Ensure ChainId.BASE is passed instead of raw network.chainId
       // Create Token instances for the SDK. Ensure symbol and name are always strings.
+      // Pass ChainId.BASE for the chainId
       const token0SDK = new Token(
-          ChainId.BASE, // Use ChainId.BASE enum
+          ChainId.BASE, // Use ChainId.BASE enum (8453)
           t0.address, 
           t0.decimals, 
           t0.symbol, 
           t0.name 
       );
       const token1SDK = new Token(
-          ChainId.BASE, // Use ChainId.BASE enum
+          ChainId.BASE, // Use ChainId.BASE enum (8453)
           t1.address, 
           t1.decimals, 
           t1.symbol, 
@@ -657,7 +657,6 @@ async function getFormattedPositionData(walletAddress) {
     console.error("Error in getFormattedPositionData:", error);
     responseMessage = `An error occurred while fetching liquidity positions: ${escapeMarkdown(error.message)}. Please try again later.`; 
   }
-  return responseMessage;
 }
 
 // --- Express App Setup for Webhook ---
