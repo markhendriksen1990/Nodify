@@ -10,7 +10,10 @@
     "ethers": "^6.x.x",
     "express": "^4.x.x",
     "body-parser": "^1.x.x",
-    "node-fetch": "^3.x.x"
+    "node-fetch": "^3.x.x",
+    "@uniswap/v3-sdk": "^1.13.0",
+    "@uniswap/sdk-core": "^4.0.0",
+    "jsbi": "^4.3.0"
   },
   "keywords": [],
   "author": "",
