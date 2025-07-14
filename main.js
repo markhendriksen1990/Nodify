@@ -391,33 +391,53 @@ async function getFormattedPositionData(walletAddress) {
           case 3000: feeAmountEnum = FeeAmount.MEDIUM; break; // 0.3%
           case 10000: feeAmountEnum = FeeAmount.HIGH; break; // 1%
           default:
-              console.warn(`WARN: Unknown fee amount ${pos.fee}. Cannot determine Pool address off-chain.`);
+              console.warn(`WARN: Unsupported fee amount ${pos.fee}. Cannot determine Pool address off-chain.`);
               responseMessage += `⚠️ Could not determine pool address due to unsupported fee tier: ${pos.fee}\n`;
               continue; // Skip this position if fee tier is not supported
       }
 
-      // Create Token instances for the SDK. Ensure symbol and name are always strings.
-      // Ensure addresses are checksummed using ethers.getAddress().
-      // Using ChainId.BASE for the chainId
-      const token0SDK = new Token(
-          ChainId.BASE, // Use ChainId.BASE enum (8453)
-          ethers.getAddress(t0.address), // Checksum address
-          t0.decimals, 
-          t0.symbol, 
-          t0.name 
-      );
-      const token1SDK = new Token(
-          ChainId.BASE, // Use ChainId.BASE enum (8453)
-          ethers.getAddress(t1.address), // Checksum address
-          t1.decimals, 
-          t1.symbol, 
-          t1.name 
-      );
+      // MODIFIED: Construct Token instances based on whether they are WETH or generic
+      let token0SDK, token1SDK;
+      // Define the canonical Base WETH address for comparison
+      const BASE_WETH_ADDRESS = '0x4200000000000000000000000000000000000006'.toLowerCase();
 
+      // Check if t0 is WETH
+      if (t0.address.toLowerCase() === BASE_WETH_ADDRESS) {
+          token0SDK = WETH9[ChainId.OPTIMISM]; // Use WETH9[10] which maps to Base WETH in this SDK version
+          // Verify it's not undefined for safety if SDK version changes its map
+          if (!token0SDK) {
+              throw new Error(`WETH9[${ChainId.OPTIMISM}] is undefined. SDK might be outdated or WETH9 map changed.`);
+          }
+      } else {
+          token0SDK = new Token(
+              ChainId.BASE, 
+              ethers.getAddress(t0.address), 
+              t0.decimals, 
+              t0.symbol, 
+              t0.name 
+          );
+      }
+
+      // Check if t1 is WETH
+      if (t1.address.toLowerCase() === BASE_WETH_ADDRESS) {
+          token1SDK = WETH9[ChainId.OPTIMISM]; // Use WETH9[10] which maps to Base WETH in this SDK version
+           // Verify it's not undefined for safety
+           if (!token1SDK) {
+              throw new Error(`WETH9[${ChainId.OPTIMISM}] is undefined. SDK might be outdated or WETH9 map changed.`);
+           }
+      } else {
+          token1SDK = new Token(
+              ChainId.BASE, 
+              ethers.getAddress(t1.address), 
+              t1.decimals, 
+              t1.symbol, 
+              t1.name 
+          );
+      }
+      
       let currentNFTPoolAddress;
       try {
-          // Pool.getAddress expects tokens to be sorted by address, but the Token objects themselves do not need to be sorted before passing to Pool.getAddress
-          // The SDK's Pool.getAddress will internally sort token0SDK and token1SDK based on their addresses.
+          // Pool.getAddress expects tokens to be sorted by address. The SDK internally handles this.
           currentNFTPoolAddress = Pool.getAddress(token0SDK, token1SDK, feeAmountEnum); 
           
           if (currentNFTPoolAddress === ethers.ZeroAddress) { 
