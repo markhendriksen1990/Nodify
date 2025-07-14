@@ -23,7 +23,7 @@ const provider = new ethers.JsonRpcProvider("https://base-mainnet.infura.io/v3/c
 const managerAddress = "0x03a520b32c04bf3beef7beb72e919cf822ed34f1";
 const myAddress = "0x2FD24cC510b7a40b176B05A5Bb628d024e3B6886";
 
-// Uniswap V3 Factory Address 
+// Uniswap V3 Factory Address (No longer needed to call getPool directly, but keep Factory ABI for completeness if any other Factory methods are used)
 const factoryAddress = "0x33128a8fc17869b8dceb626f79ceefbeed336b3b"; 
 
 // --- ABIs ---
@@ -66,9 +66,11 @@ const factoryAbi = [
   "function getPool(address tokenA, address tokenB, uint24 fee) view returns (address pool)"
 ];
 
+// MODIFIED: erc20Abi to include the 'name()' function signature
 const erc20Abi = [
   "function symbol() view returns (string)",
-  "function decimals() view returns (uint8)"
+  "function decimals() view returns (uint8)",
+  "function name() view returns (string)" // Added 'name()' function
 ];
 
 const UINT128_MAX = "340282366920938463463374607431768211455";
@@ -117,7 +119,12 @@ async function getTokenMeta(addr) {
   console.log(`DEBUG: Fetching meta for token address: ${addr}`);
   try {
     const t = new ethers.Contract(addr, erc20Abi, provider);
-    const [symbol, decimals, name] = await Promise.all([t.symbol(), t.decimals(), t.name().catch(() => null)]); // Attempt to get name, fallback to null
+    // Directly get name, symbol, decimals in parallel
+    const [symbol, decimals, name] = await Promise.all([
+        t.symbol(), 
+        t.decimals(), 
+        t.name().catch(() => null) // .catch() handles cases where name() might revert or not exist
+    ]); 
     console.log(`DEBUG: Token meta fetched - Symbol: ${symbol}, Decimals: ${decimals}, Name: ${name}`);
     return { symbol, decimals, address: addr, name: name || symbol }; // Provide name, using symbol as fallback
   } catch(e) {
@@ -384,9 +391,22 @@ async function getFormattedPositionData(walletAddress) {
               continue; // Skip this position if fee tier is not supported
       }
 
-      // Create Token instances for the SDK, preserving original token0/token1 identities
-      const token0SDK = new Token(network.chainId, t0.address, t0.decimals, t0.symbol, t0.name);
-      const token1SDK = new Token(network.chainId, t1.address, t1.decimals, t1.symbol, t1.name);
+      // Create Token instances for the SDK. Ensure symbol and name are always strings.
+      // The SDK handles sorting of these Token objects internally for Pool.getAddress.
+      const token0SDK = new Token(
+          network.chainId, 
+          t0.address, 
+          t0.decimals, 
+          t0.symbol, 
+          t0.name // t0.name is guaranteed to be string or "UNKNOWN" now
+      );
+      const token1SDK = new Token(
+          network.chainId, 
+          t1.address, 
+          t1.decimals, 
+          t1.symbol, 
+          t1.name // t1.name is guaranteed to be string or "UNKNOWN" now
+      );
 
       let currentNFTPoolAddress;
       try {
@@ -630,7 +650,6 @@ async function getFormattedPositionData(walletAddress) {
     console.error("Error in getFormattedPositionData:", error);
     responseMessage = `An error occurred while fetching liquidity positions: ${escapeMarkdown(error.message)}. Please try again later.`; 
   }
-  return responseMessage;
 }
 
 // --- Express App Setup for Webhook ---
