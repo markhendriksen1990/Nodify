@@ -120,9 +120,9 @@ async function getTokenMeta(addr) {
   try {
     const t = new ethers.Contract(addr, erc20Abi, provider);
     const [fetchedSymbol, fetchedDecimals, fetchedName] = await Promise.all([
-        t.symbol().catch(() => null), // Catch errors, default to null
-        t.decimals().catch(() => null), // Catch errors, default to null
-        t.name().catch(() => null) // Catch errors, default to null
+        t.symbol().catch(() => null), 
+        t.decimals().catch(() => null), 
+        t.name().catch(() => null) 
     ]); 
 
     // Ensure symbol and name are non-empty strings, and decimals is a number
@@ -397,17 +397,17 @@ async function getFormattedPositionData(walletAddress) {
       }
 
       // Create Token instances for the SDK. Ensure symbol and name are always strings.
-      // Pass ChainId.BASE for the chainId
+      // And ensure addresses are checksummed.
       const token0SDK = new Token(
           ChainId.BASE, // Use ChainId.BASE enum (8453)
-          t0.address, 
+          ethers.getAddress(t0.address), // Checksum address
           t0.decimals, 
           t0.symbol, 
-          t0.name 
+          t0.name // t0.name is guaranteed to be string or "UNKNOWN" now
       );
       const token1SDK = new Token(
           ChainId.BASE, // Use ChainId.BASE enum (8453)
-          t1.address, 
+          ethers.getAddress(t1.address), // Checksum address
           t1.decimals, 
           t1.symbol, 
           t1.name 
@@ -415,8 +415,7 @@ async function getFormattedPositionData(walletAddress) {
 
       let currentNFTPoolAddress;
       try {
-          // Pool.getAddress expects tokens to be sorted by address, even if the factory doesn't.
-          // The SDK internally sorts them for Pool.getAddress if needed.
+          // Pool.getAddress expects tokens to be sorted by address. The SDK internally handles this.
           currentNFTPoolAddress = Pool.getAddress(token0SDK, token1SDK, feeAmountEnum); 
           
           if (currentNFTPoolAddress === ethers.ZeroAddress) { 
