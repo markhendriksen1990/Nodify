@@ -6,7 +6,7 @@ const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fet
 
 // Import Uniswap SDK components
 const { Pool, FeeAmount } = require('@uniswap/v3-sdk');
-const { Token, WETH9, CurrencyAmount, ChainId } = require('@uniswap/sdk-core'); // ChainId is imported
+const { Token, WETH9, CurrencyAmount, ChainId } = require('@uniswap/sdk-core'); 
 const JSBI = require('jsbi'); 
 
 
@@ -391,12 +391,14 @@ async function getFormattedPositionData(walletAddress) {
           case 3000: feeAmountEnum = FeeAmount.MEDIUM; break; // 0.3%
           case 10000: feeAmountEnum = FeeAmount.HIGH; break; // 1%
           default:
-              console.warn(`WARN: Unknown fee amount ${pos.fee}. Cannot determine Pool address off-chain.`);
+              console.warn(`WARN: Unsupported fee amount ${pos.fee}. Cannot determine Pool address off-chain.`);
               responseMessage += `⚠️ Could not determine pool address due to unsupported fee tier: ${pos.fee}\n`;
               continue; // Skip this position if fee tier is not supported
       }
 
-      // Create Token instances for the SDK. Ensure symbol and name are always strings and addresses are checksummed.
+      // Create Token instances for the SDK. Ensure symbol and name are always strings.
+      // Ensure addresses are checksummed using ethers.getAddress().
+      // Use ChainId.BASE for the chainId.
       const token0SDK = new Token(
           ChainId.BASE, // Use ChainId.BASE enum (8453)
           ethers.getAddress(t0.address), // Checksum address
@@ -414,7 +416,7 @@ async function getFormattedPositionData(walletAddress) {
 
       let currentNFTPoolAddress;
       try {
-          // The SDK internally sorts tokens for Pool.getAddress if needed.
+          // Pool.getAddress expects tokens to be sorted by address. The SDK internally handles this.
           currentNFTPoolAddress = Pool.getAddress(token0SDK, token1SDK, feeAmountEnum); 
           
           if (currentNFTPoolAddress === ethers.ZeroAddress) { 
