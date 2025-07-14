@@ -11,8 +11,8 @@ const RENDER_WEBHOOK_URL = process.env.RENDER_WEBHOOK_URL;
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 
 // --- Ethers.js Provider and Contract Addresses ---
-//const provider = new ethers.JsonRpcProvider("https://base.publicnode.com");
-const provider = new ethers.JsonRpcProvider("https://base-mainnet.infura.io/v3/cceebb32fc834db39318ba89b48471a1")
+// CORRECTED: Provider URL changed to Base MAINNET Infura endpoint
+const provider = new ethers.JsonRpcProvider("https://base-mainnet.infura.io/v3/cceebb32fc834db39318ba89b48471a1");
 
 
 const managerAddress = "0x03a520b32c04bf3beef7beb72e919cf822ed34f1";
@@ -344,7 +344,7 @@ async function getFormattedPositionData(walletAddress) {
       responseMessage += `🔹 Token ID: \`${tokenId.toString()}\`\n`;
       
       console.log(`DEBUG: Calling manager.positions(${tokenId})`);
-      const pos = await manager.positions(tokenId); // ERROR POINT
+      const pos = await manager.positions(tokenId); 
       console.log(`DEBUG: Position details fetched for tokenId ${tokenId}. pos.token0: ${pos.token0}, pos.token1: ${pos.token1}, pos.fee: ${pos.fee}`);
 
       const [t0, t1] = await Promise.all([
