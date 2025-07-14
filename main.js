@@ -6,7 +6,7 @@ const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fet
 
 // Import Uniswap SDK components
 const { Pool, FeeAmount } = require('@uniswap/v3-sdk');
-const { Token, WETH9, CurrencyAmount, ChainId } = require('@uniswap/sdk-core'); // ADDED ChainId import
+const { Token, WETH9, CurrencyAmount, ChainId } = require('@uniswap/sdk-core'); // ChainId is imported
 const JSBI = require('jsbi'); 
 
 
@@ -66,6 +66,7 @@ const factoryAbi = [
   "function getPool(address tokenA, address tokenB, uint24 fee) view returns (address pool)"
 ];
 
+// MODIFIED: erc20Abi to include the 'name()' function signature
 const erc20Abi = [
   "function symbol() view returns (string)",
   "function decimals() view returns (uint8)",
@@ -395,30 +396,28 @@ async function getFormattedPositionData(walletAddress) {
               continue; // Skip this position if fee tier is not supported
       }
 
+      // MODIFIED: Ensure ChainId.BASE is passed instead of raw network.chainId
       // Create Token instances for the SDK. Ensure symbol and name are always strings.
-      // The SDK handles sorting of these Token objects internally for Pool.getAddress.
       const token0SDK = new Token(
-          network.chainId, // Use chainId from resolved provider network
+          ChainId.BASE, // Use ChainId.BASE enum
           t0.address, 
           t0.decimals, 
           t0.symbol, 
-          t0.name // t0.name is guaranteed to be string or "UNKNOWN" now
+          t0.name 
       );
       const token1SDK = new Token(
-          network.chainId, 
+          ChainId.BASE, // Use ChainId.BASE enum
           t1.address, 
           t1.decimals, 
           t1.symbol, 
-          t1.name // t1.name is guaranteed to be string or "UNKNOWN" now
+          t1.name 
       );
 
       let currentNFTPoolAddress;
       try {
-          // Pool.getAddress expects tokens to be sorted by address. Although constructor handles it,
-          // it's good practice to ensure consistency if one token is WETH9 or a special token.
-          // Let's pass the sorted tokenSDK objects based on their address.
-          const sortedTokens = token0SDK.sortsBefore(token1SDK) ? [token0SDK, token1SDK] : [token1SDK, token0SDK];
-          currentNFTPoolAddress = Pool.getAddress(sortedTokens[0], sortedTokens[1], feeAmountEnum);
+          // Pool.getAddress expects tokens to be sorted by address, even if the factory doesn't.
+          // The SDK internally sorts them for Pool.getAddress if needed.
+          currentNFTPoolAddress = Pool.getAddress(token0SDK, token1SDK, feeAmountEnum); 
           
           if (currentNFTPoolAddress === ethers.ZeroAddress) { 
               throw new Error(`Pool.getAddress computed zero address for pool ${t0.symbol}/${t1.symbol} fee ${pos.fee}. Pool might not exist.`);
