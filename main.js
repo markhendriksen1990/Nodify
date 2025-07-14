@@ -313,6 +313,11 @@ async function getFormattedPositionData(walletAddress) {
   let prices = { WETH: 0, USDC: 0 }; 
 
   try {
+    // Await provider.getNetwork() to ensure chainId is available
+    const network = await provider.getNetwork(); // Ensure network details are fetched
+    console.log(`DEBUG: Connected to network: ${network.name} (Chain ID: ${network.chainId})`);
+
+
     // Fetch CURRENT prices from CoinLore
     console.log('DEBUG: Calling getUsdPrices (CoinLore)');
     prices = await getUsdPrices(); 
@@ -359,20 +364,25 @@ async function getFormattedPositionData(walletAddress) {
       console.log(`DEBUG: Token metadata fetched for pool tokens.`);
 
       // Dynamically get pool address for this specific NFT's token0, token1, and fee tier
-      console.log(`DEBUG: Getting pool address via factory for ${t0.symbol}/${t1.symbol} fee: ${pos.fee}. Original token order: ${pos.token0}, ${pos.token1}`);
+      console.log(`DEBUG: Getting pool address off-chain via Uniswap SDK for ${t0.symbol}/${t1.symbol} fee: ${pos.fee}.`);
       
-      // Sort token addresses for getPool as required by Uniswap V3 Factory
-      let tokenA = pos.token0;
-      let tokenB = pos.token1;
-      if (tokenA.toLowerCase() > tokenB.toLowerCase()) { // Sort lexicographically
-          [tokenA, tokenB] = [tokenB, tokenA];
-          console.log(`DEBUG: Tokens sorted for getPool: ${tokenA}, ${tokenB}`);
-      }
+      // Sort token addresses for Pool.getAddress as required by Uniswap V3 SDK
+      // The SDK expects tokens to be sorted by address for Pool.getAddress
+      let token0Address = t0.address;
+      let token1Address = t1.address;
 
+      // Ensure token order for SDK (lexicographical comparison)
+      const isToken0First = token0Address.toLowerCase() < token1Address.toLowerCase();
+      const tokenASDK = isToken0First 
+          ? new Token(network.chainId, t0.address, t0.decimals, t0.symbol, t0.name)
+          : new Token(network.chainId, t1.address, t1.decimals, t1.symbol, t1.name);
+      const tokenBSDK = isToken0First
+          ? new Token(network.chainId, t1.address, t1.decimals, t1.symbol, t1.name)
+          : new Token(network.chainId, t0.address, t0.decimals, t0.symbol, t0.name);
+      
       let currentNFTPoolAddress;
-      // Using Pool.getAddress from @uniswap/v3-sdk for off-chain computation
       try {
-          // Determine the FeeAmount enum from the numerical fee
+          // Map the numerical fee to FeeAmount enum
           let feeAmountEnum;
           switch (Number(pos.fee)) {
               case 500: feeAmountEnum = FeeAmount.LOW; break; // 0.05%
@@ -382,22 +392,12 @@ async function getFormattedPositionData(walletAddress) {
                   console.warn(`WARN: Unknown fee amount ${pos.fee}. Cannot determine Pool address off-chain.`);
                   throw new Error(`Unsupported fee tier: ${pos.fee}`);
           }
-
-          // Create Token instances for the SDK
-          const token0SDK = new Token(provider.network.chainId, t0.address, t0.decimals, t0.symbol, t0.name);
-          const token1SDK = new Token(provider.network.chainId, t1.address, t1.decimals, t1.symbol, t1.name);
-
-          // Get the pool address off-chain
-          currentNFTPoolAddress = Pool.getAddress(
-              token0SDK,
-              token1SDK,
-              feeAmountEnum
-          );
-          console.log(`DEBUG: Pool address computed off-chain: ${currentNFTPoolAddress}`);
-
+          currentNFTPoolAddress = Pool.getAddress(tokenASDK, tokenBSDK, feeAmountEnum);
+          
           if (currentNFTPoolAddress === ethers.ZeroAddress) { // Still check if it computes to zero address
               throw new Error(`Pool.getAddress computed zero address for pool ${t0.symbol}/${t1.symbol} fee ${pos.fee}. Pool might not exist.`);
           }
+          console.log(`DEBUG: Pool address computed off-chain: ${currentNFTPoolAddress}`);
           
       } catch (e) {
           console.error(`ERROR: Failed to compute pool address off-chain for ${t0.symbol}/${t1.symbol} fee ${pos.fee}: ${e.message}`);
