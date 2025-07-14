@@ -391,14 +391,14 @@ async function getFormattedPositionData(walletAddress) {
           case 3000: feeAmountEnum = FeeAmount.MEDIUM; break; // 0.3%
           case 10000: feeAmountEnum = FeeAmount.HIGH; break; // 1%
           default:
-              console.warn(`WARN: Unsupported fee amount ${pos.fee}. Cannot determine Pool address off-chain.`);
+              console.warn(`WARN: Unknown fee amount ${pos.fee}. Cannot determine Pool address off-chain.`);
               responseMessage += `⚠️ Could not determine pool address due to unsupported fee tier: ${pos.fee}\n`;
               continue; // Skip this position if fee tier is not supported
       }
 
       // Create Token instances for the SDK. Ensure symbol and name are always strings.
       // Ensure addresses are checksummed using ethers.getAddress().
-      // Use ChainId.BASE for the chainId.
+      // Using ChainId.BASE for the chainId
       const token0SDK = new Token(
           ChainId.BASE, // Use ChainId.BASE enum (8453)
           ethers.getAddress(t0.address), // Checksum address
@@ -416,7 +416,8 @@ async function getFormattedPositionData(walletAddress) {
 
       let currentNFTPoolAddress;
       try {
-          // Pool.getAddress expects tokens to be sorted by address. The SDK internally handles this.
+          // Pool.getAddress expects tokens to be sorted by address, but the Token objects themselves do not need to be sorted before passing to Pool.getAddress
+          // The SDK's Pool.getAddress will internally sort token0SDK and token1SDK based on their addresses.
           currentNFTPoolAddress = Pool.getAddress(token0SDK, token1SDK, feeAmountEnum); 
           
           if (currentNFTPoolAddress === ethers.ZeroAddress) { 
