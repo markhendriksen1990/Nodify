@@ -6,7 +6,7 @@ const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fet
 
 // Import Uniswap SDK components
 const { Pool, FeeAmount } = require('@uniswap/v3-sdk');
-const { Token, WETH9, CurrencyAmount, ChainId } = require('@uniswap/sdk-core'); 
+const { Token, WETH9, CurrencyAmount, ChainId } = require('@uniswap/sdk-core'); // ChainId is imported
 const JSBI = require('jsbi'); 
 
 
@@ -23,7 +23,7 @@ const provider = new ethers.JsonRpcProvider("https://base-mainnet.infura.io/v3/c
 const managerAddress = "0x03a520b32c04bf3beef7beb72e919cf822ed34f1";
 const myAddress = "0x2FD24cC510b7a40b176B05A5Bb628d024e3B6886";
 
-// Uniswap V3 Factory Address (No longer needed to call getPool directly, but keep Factory ABI for completeness if any other Factory methods are used)
+// Uniswap V3 Factory Address (No longer needed to call getPool directly, as we use Pool.getAddress off-chain)
 const factoryAddress = "0x33128a8fc17869b8dceb626f79ceefbeed336b3b"; 
 
 // --- ABIs ---
@@ -62,11 +62,10 @@ const poolAbi = [
   "function token1() view returns (address)"
 ];
 
-const factoryAbi = [
+const factoryAbi = [ // Keep factory ABI for completeness, if you use other factory methods
   "function getPool(address tokenA, address tokenB, uint24 fee) view returns (address pool)"
 ];
 
-// MODIFIED: erc20Abi to include the 'name()' function signature
 const erc20Abi = [
   "function symbol() view returns (string)",
   "function decimals() view returns (uint8)",
@@ -397,13 +396,13 @@ async function getFormattedPositionData(walletAddress) {
       }
 
       // Create Token instances for the SDK. Ensure symbol and name are always strings.
-      // And ensure addresses are checksummed.
+      // Pass ChainId.BASE for the chainId
       const token0SDK = new Token(
           ChainId.BASE, // Use ChainId.BASE enum (8453)
           ethers.getAddress(t0.address), // Checksum address
           t0.decimals, 
           t0.symbol, 
-          t0.name // t0.name is guaranteed to be string or "UNKNOWN" now
+          t0.name 
       );
       const token1SDK = new Token(
           ChainId.BASE, // Use ChainId.BASE enum (8453)
@@ -415,7 +414,8 @@ async function getFormattedPositionData(walletAddress) {
 
       let currentNFTPoolAddress;
       try {
-          // Pool.getAddress expects tokens to be sorted by address. The SDK internally handles this.
+          // Pool.getAddress expects tokens to be sorted by address, even if the factory doesn't.
+          // The SDK internally sorts them for Pool.getAddress if needed.
           currentNFTPoolAddress = Pool.getAddress(token0SDK, token1SDK, feeAmountEnum); 
           
           if (currentNFTPoolAddress === ethers.ZeroAddress) { 
