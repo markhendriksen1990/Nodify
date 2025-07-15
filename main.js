@@ -343,16 +343,14 @@ async function getFormattedPositionData(walletAddress) {
 
                 const histWETHCurrent = await fetchHistoricalPrice('ethereum', dateStrCurrent);
                 const histUSDCCurrent = await fetchHistoricalPrice('usd-coin', dateStrCurrent);
-
-                // ++ FIX: Get the historical state of the pool at the mint block to find the price at that time.
+                
                 const historicalSlot0 = await pool.slot0({ blockTag: mintBlock });
                 const historicalTick = historicalSlot0.tick;
                 const historicalSqrtPriceX96 = tickToSqrtPriceX96(historicalTick);
 
-                // ++ FIX: Use the historical price (sqrtPriceX96) to calculate initial amounts, not the lower bound of the range.
                 const [histAmt0Current_raw, histAmt1Current_raw] = getAmountsFromLiquidity(
                     pos.liquidity,
-                    historicalSqrtPriceX96, // Use the actual price at the time of minting
+                    historicalSqrtPriceX96,
                     tickToSqrtPriceX96(Number(pos.tickLower)),
                     tickToSqrtPriceX96(Number(pos.tickUpper))
                 );
@@ -390,7 +388,9 @@ async function getFormattedPositionData(walletAddress) {
                 currentPositionMessage += `📅 Created: ${currentPositionStartDate.toISOString().replace('T', ' ').slice(0, 19)}\n`;
                 currentPositionMessage += `💰 Initial Investment: $${currentPositionInitialPrincipalUSD.toFixed(2)}\n`;
             } catch (error) {
-                currentPositionMessage += `⚠️ Could not analyze position history: ${error.message}\n`;
+                // ++ FIX: Sanitize the error message to remove markdown characters before sending to Telegram ++
+                const sanitizedErrorMessage = (error.message || "Unknown error").replace(/[*_`[\]]/g, '');
+                currentPositionMessage += `⚠️ Could not analyze position history: ${sanitizedErrorMessage}\n`;
             }
 
             const lowerPrice = tickToPricePerToken0(Number(pos.tickLower), Number(t0.decimals), Number(t1.decimals));
@@ -501,7 +501,9 @@ async function getFormattedPositionData(walletAddress) {
 
     } catch (error) {
         console.error("Error in getFormattedPositionData:", error);
-        responseMessage = `An error occurred while fetching liquidity positions: ${error.message}. Please try again later.`;
+        // ++ FIX: Sanitize the error message to remove markdown characters before sending to Telegram ++
+        const sanitizedErrorMessage = (error.message || "Unknown error").replace(/[*_`[\]]/g, '');
+        responseMessage = `An error occurred while fetching liquidity positions: ${sanitizedErrorMessage}. Please try again later.`;
     }
     return responseMessage;
 }
