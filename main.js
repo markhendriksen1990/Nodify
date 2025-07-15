@@ -569,25 +569,7 @@ async function getFormattedPositionData(walletAddress) {
       const inRange = nativeTick >= pos.tickLower && nativeTick < pos.tickUpper;
       responseMessage += `📍 In Range? ${inRange ? "✅ Yes" : "❌ No"}\n`;
 
-      // Calculate current amounts (moved outside to use for optimization skip)
-      // const [raw0, raw1] = getAmountsFromLiquidity(pos.liquidity, sqrtP, sqrtL, sqrtU);
-      // const amt0 = parseFloat(formatUnits(raw0, t0.decimals));
-      // const amt1 = parseFloat(formatUnits(raw1, t1.decimals));
-
-      // let amtWETH = 0, amtUSDC = 0;
-      // if (t0.symbol.toUpperCase() === "WETH") {
-      //   amtWETH = amt0;
-      //   amtUSDC = amt1;
-      // } else {
-      //   amtWETH = amt1;
-      //   amtUSDC = amt0;
-      // }
-
-      // const principalUSD = amtWETH * prices.WETH + amtUSDC * prices.USDC;
-      totalPortfolioPrincipalUSD += principalUSD; // Accumulate for overall sum excluding fees
-
-      const ratio = getRatio(amtWETH * prices.WETH, amtUSDC * prices.USDC);
-
+      // Holdings and Fees displays (principalUSD and totalPositionFeesUSD are already calculated)
       responseMessage += `\n*Current Holdings*\n`; // Removed icon
       responseMessage += `🏛 ${formatTokenAmount(amtWETH, 6)} WETH ($${(amtWETH * prices.WETH).toFixed(2)})\n`;
       responseMessage += `🏛 ${formatTokenAmount(amtUSDC, 2)} USDC ($${(amtUSDC * prices.USDC).toFixed(2)})\n`;
@@ -599,22 +581,12 @@ async function getFormattedPositionData(walletAddress) {
           responseMessage += `📈 Holdings change: $${positionHoldingsChange.toFixed(2)}\n`; 
       }
 
-
-      // Uncollected Fees analysis (moved to be calculated earlier for optimization skip)
-      // const xp = await manager.collect.staticCall({ ... });
-      // const fee0 = parseFloat(formatUnits(xp[0], t0.decimals));
-      // const fee1 = parseFloat(formatUnits(xp[1], t1.decimals));
-      // const feeUSD0 = fee0 * (...);
-      // const feeUSD1 = fee1 * (...);
-      // const totalPositionFeesUSD = feeUSD0 + feeUSD1;
-
       responseMessage += `\n*Uncollected Fees*\n`; // Removed icon
       responseMessage += `💰 ${formatTokenAmount(fee0, 6)} ${t0.symbol} ($${feeUSD0.toFixed(2)})\n`;
       responseMessage += `💰 ${formatTokenAmount(fee1, 2)} ${t1.symbol} ($${feeUSD1.toFixed(2)})\n`;
-      responseMessage += `💰 Total Fees: *$${totalPositionFeesUSD.toFixed(2)}*\n`; // Add Total Fees to Uncollected Fees
+      responseMessage += `💰 Total Fees: *$${totalPositionFeesUSD.toFixed(2)}*\n`; 
 
-
-      // Per-Position Fee Performance (uses currentPositionStartDate and currentPositionInitialPrincipalUSD)
+      // Per-Position Fee Performance
       if (positionHistoryAnalysisSucceeded && currentPositionInitialPrincipalUSD !== null && currentPositionInitialPrincipalUSD > 0) {
           const now = new Date();
           const elapsedMs = now.getTime() - currentPositionStartDate.getTime();
@@ -624,7 +596,7 @@ async function getFormattedPositionData(walletAddress) {
           const rewardsPerYear = rewardsPerDay * 365.25;
           const feesAPR = (rewardsPerYear / currentPositionInitialPrincipalUSD) * 100;
 
-          responseMessage += `\n*Fee Performance*\n`; // Removed icon
+          responseMessage += `\n*Fee Performance*\n`; 
           responseMessage += `💎 Fees per hour: $${rewardsPerHour.toFixed(2)}\n`; 
           responseMessage += `💎 Fees per day: $${rewardsPerDay.toFixed(2)}\n`; 
           responseMessage += `💎 Fees per month: $${rewardsPerMonth.toFixed(2)}\n`; 
@@ -635,18 +607,17 @@ async function getFormattedPositionData(walletAddress) {
       }
 
       const currentTotalValue = principalUSD + totalPositionFeesUSD;
-      responseMessage += `\n🏦 Position Value: *$${currentTotalValue.toFixed(2)}*\n`; // Changed to Position Value
+      responseMessage += `\n🏦 Position Value: *$${currentTotalValue.toFixed(2)}*\n`; 
 
-      // NEW: Position Total return + Fees
-      const positionReturn = principalUSD - currentPositionInitialPrincipalUSD; // Principal gain/loss for this position
-      const positionTotalGains = positionReturn + totalPositionFeesUSD; // Total gain including fees for this position
+      const positionReturn = principalUSD - currentPositionInitialPrincipalUSD; 
+      const positionTotalGains = positionReturn + totalPositionFeesUSD; 
       if (positionHistoryAnalysisSucceeded && currentPositionInitialPrincipalUSD > 0) {
           responseMessage += `📈 Position Total return + Fees: $${positionTotalGains.toFixed(2)}\n`;
       }
 
 
       totalFeeUSD += (feeUSD0 + feeUSD1);
-      currentTotalPortfolioValue += currentTotalValue; // Accumulate total value of all positions including fees
+      currentTotalPortfolioValue += currentTotalValue; 
     }
 
     // --- Overall Portfolio Performance Analysis Section ---
@@ -658,32 +629,23 @@ async function getFormattedPositionData(walletAddress) {
         const rewardsPerMonth = rewardsPerDay * 30.44;
         const rewardsPerYear = rewardsPerDay * 365.25;
         
-        // Corrected Total Return: Principal-only change across all positions
         const totalReturn = totalPortfolioPrincipalUSD - startPrincipalUSD; 
         const totalReturnPercent = (totalReturn / startPrincipalUSD) * 100;
         
         const feesAPR = (rewardsPerYear / startPrincipalUSD) * 100;
 
         responseMessage += `\n=== *OVERALL PORTFOLIO PERFORMANCE* ===\n`;
-        // Removed: Oldest Position and Analysis Period lines
         responseMessage += `🏛 Initial Investment: $${startPrincipalUSD.toFixed(2)}\n`; 
-        responseMessage += `🏛 Total Holdings: $${totalPortfolioPrincipalUSD.toFixed(2)}\n`; // Use totalPortfolioPrincipalUSD
-        responseMessage += `📈 Holdings Return: $${totalReturn.toFixed(2)} (${totalReturnPercent.toFixed(2)}%)\n`; // Changed to Holdings Return
+        responseMessage += `🏛 Total Holdings: $${totalPortfolioPrincipalUSD.toFixed(2)}\n`; 
+        responseMessage += `📈 Holdings Return: $${totalReturn.toFixed(2)} (${totalReturnPercent.toFixed(2)}%)\n`; 
         
-        responseMessage += `\n*Fee Performance*\n`; // Removed icon
+        responseMessage += `\n*Fee Performance*\n`; 
         responseMessage += `💰 Total Fees Earned: $${totalFeeUSD.toFixed(2)}\n`;
-        // Removed: Fees per hour/day/month/year lines
-        responseMessage += `💰 Fees APR: ${feesAPR.toFixed(2)}%\n`;
+        responseMessage += `💰 Fees APR: ${feesAPR.toFixed(2)}%\n`; 
 
-        // Corrected All time gains: Principal return + Total Fees Earned
         const allTimeGains = totalReturn + totalFeeUSD; 
-        responseMessage += `\n📈 Total return + Fees: $${allTimeGains.toFixed(2)}\n`; // Changed text and icon
+        responseMessage += `\n📈 Total return + Fees: $${allTimeGains.toFixed(2)}\n`; 
 
-        // Removed: Overall Performance heading and Total APR (incl. price changes) line
-        // If you need the overall APR for the total value (principal + fees) again, re-add this explicitly.
-        // responseMessage += `\n🎯 *Overall Performance*\n`;
-        // const totalAPRInclPriceChanges = ((currentTotalPortfolioValue - startPrincipalUSD) / startPrincipalUSD) * (365.25 / (elapsedMs / (1000 * 60 * 60 * 24))) * 100;
-        // responseMessage += `📈 Total APR (incl. price changes): ${totalAPRInclPriceChanges.toFixed(2)}%\n`;
     } else {
         responseMessage += `\n❌ Coingecko API might be on cooldown. Could not determine start date or initial investment.\n`; 
     }
@@ -692,6 +654,7 @@ async function getFormattedPositionData(walletAddress) {
     console.error("Error in getFormattedPositionData:", error);
     responseMessage = `An error occurred while fetching liquidity positions: ${escapeMarkdown(error.message)}. Please try again later.`; 
   }
+  return responseMessage;
 }
 
 // --- Express App Setup for Webhook ---
@@ -778,14 +741,4 @@ async function sendChatAction(chatId, action) {
                 action: action
             })
         });
-    } catch (error) {
-        console.error('Error sending chat action to Telegram:', error);
     }
-}
-
-
-// Start the Express server
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-    console.log(`Telegram webhook URL: ${RENDER_WEBHOOK_URL}/bot${TELEGRAM_BOT_TOKEN}/webhook`);
-});
