@@ -344,19 +344,9 @@ async function getFormattedPositionData(walletAddress) {
                 const histWETHCurrent = await fetchHistoricalPrice('ethereum', dateStrCurrent);
                 const histUSDCCurrent = await fetchHistoricalPrice('usd-coin', dateStrCurrent);
 
-                // ++ FIX: Correctly get the historical price tick from the pool at the mint block. ++
-                const historicalSlot0 = await pool.slot0({ blockTag: mintBlock });
-                const historicalTick = historicalSlot0.tick;
-                const historicalSqrtPriceX96 = tickToSqrtPriceX96(historicalTick);
-
-                // ++ FIX: Use the historical SqrtPrice to get an accurate estimation of initial token amounts. ++
                 const [histAmt0Current_raw, histAmt1Current_raw] = getAmountsFromLiquidity(
-                    pos.liquidity,
-                    historicalSqrtPriceX96,
-                    tickToSqrtPriceX96(Number(pos.tickLower)),
-                    tickToSqrtPriceX96(Number(pos.tickUpper))
+                    pos.liquidity, tickToSqrtPriceX96(Number(pos.tickLower)), tickToSqrtPriceX96(Number(pos.tickLower)), tickToSqrtPriceX96(Number(pos.tickUpper))
                 );
-
                 let histWETHamtCurrent = 0, histUSDCamtCurrent = 0;
                 if (t0.symbol.toUpperCase() === "WETH") {
                     histWETHamtCurrent = parseFloat(formatUnits(histAmt0Current_raw, t0.decimals));
@@ -366,6 +356,7 @@ async function getFormattedPositionData(walletAddress) {
                     histUSDCamtCurrent = parseFloat(formatUnits(histAmt0Current_raw, t0.decimals));
                 }
                 
+                // ++ NEW: Added log lines for debugging ++
                 console.log(`--- Debugging Initial Investment for Token ID: ${tokenId.toString()} ---`);
                 console.log(`Mint Date: ${dateStrCurrent}`);
                 console.log(`Historical WETH Price: $${histWETHCurrent}`);
@@ -390,8 +381,7 @@ async function getFormattedPositionData(walletAddress) {
                 currentPositionMessage += `📅 Created: ${currentPositionStartDate.toISOString().replace('T', ' ').slice(0, 19)}\n`;
                 currentPositionMessage += `💰 Initial Investment: $${currentPositionInitialPrincipalUSD.toFixed(2)}\n`;
             } catch (error) {
-                const sanitizedErrorMessage = (error.message || "Unknown error").replace(/[*_`[\]]/g, '');
-                currentPositionMessage += `⚠️ Could not analyze position history: ${sanitizedErrorMessage}\n`;
+                currentPositionMessage += `⚠️ Could not analyze position history: ${error.message}\n`;
             }
 
             const lowerPrice = tickToPricePerToken0(Number(pos.tickLower), Number(t0.decimals), Number(t1.decimals));
@@ -502,8 +492,7 @@ async function getFormattedPositionData(walletAddress) {
 
     } catch (error) {
         console.error("Error in getFormattedPositionData:", error);
-        const sanitizedErrorMessage = (error.message || "Unknown error").replace(/[*_`[\]]/g, '');
-        responseMessage = `An error occurred while fetching liquidity positions: ${sanitizedErrorMessage}. Please try again later.`;
+        responseMessage = `An error occurred while fetching liquidity positions: ${error.message}. Please try again later.`;
     }
     return responseMessage;
 }
