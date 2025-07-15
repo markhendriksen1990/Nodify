@@ -23,7 +23,7 @@ const provider = new ethers.JsonRpcProvider("https://base-mainnet.infura.io/v3/c
 const managerAddress = "0x03a520b32c04bf3beef7beb72e919cf822ed34f1";
 const myAddress = "0x2FD24cC510b7a40b176B05A5Bb628d024e3B6886";
 
-// Uniswap V3 Factory Address (No longer needed to call getPool directly, but keep Factory ABI for completeness if any other Factory methods are used)
+// Uniswap V3 Factory Address (UPDATED to the address from your working snippet)
 const factoryAddress = "0x33128a8fC17869897dcE68Ed026d694621f6FDfD"; 
 
 // --- ABIs ---
@@ -62,11 +62,10 @@ const poolAbi = [
   "function token1() view returns (address)"
 ];
 
-const factoryAbi = [
+const factoryAbi = [ // Factory ABI simplified to just getPool, as other methods are not used.
   "function getPool(address tokenA, address tokenB, uint24 fee) view returns (address pool)"
 ];
 
-// MODIFIED: erc20Abi to include the 'name()' function signature
 const erc20Abi = [
   "function symbol() view returns (string)",
   "function decimals() view returns (uint8)",
@@ -380,10 +379,40 @@ async function getFormattedPositionData(walletAddress) {
       console.log(`DEBUG: Getting pool address off-chain via Uniswap SDK for ${t0.symbol}/${t1.symbol} fee: ${pos.fee}.`);
       
       // Create Token instances for the SDK. They need chainId, address, decimals, symbol, name.
-      // The SDK's Pool.getAddress canonical form expects tokens to be sorted by address internally
-      // but the Token objects themselves should reflect their true identity.
-      // The FeeAmount enum is also required for the SDK.
-      
+      // Use ChainId.BASE for the chainId (8453).
+      // Checksum addresses.
+      // For WETH, use WETH9[ChainId.OPTIMISM] as a workaround for current SDK version's WETH9 map.
+      const BASE_WETH_ADDRESS = '0x4200000000000000000000000000000000000006'.toLowerCase(); // Canonical WETH address on Base
+
+      let token0SDK, token1SDK;
+
+      // Handle token0
+      if (t0.address.toLowerCase() === BASE_WETH_ADDRESS) {
+          if (WETH9[ChainId.OPTIMISM]) { // Check if WETH9[10] exists (often has Base WETH address)
+              token0SDK = WETH9[ChainId.OPTIMISM];
+              console.log(`DEBUG: Using WETH9[${ChainId.OPTIMISM}] for token0: ${t0.symbol}`);
+          } else {
+              // Fallback to generic Token if WETH9[10] isn't available either (e.g., very old SDK version)
+              token0SDK = new Token(ChainId.BASE, ethers.getAddress(t0.address), t0.decimals, t0.symbol, t0.name);
+              console.warn(`WARN: WETH9[${ChainId.OPTIMISM}] not found. Falling back to generic Token for ${t0.symbol}.`);
+          }
+      } else {
+          token0SDK = new Token(ChainId.BASE, ethers.getAddress(t0.address), t0.decimals, t0.symbol, t0.name);
+      }
+
+      // Handle token1
+      if (t1.address.toLowerCase() === BASE_WETH_ADDRESS) {
+          if (WETH9[ChainId.OPTIMISM]) {
+              token1SDK = WETH9[ChainId.OPTIMISM];
+              console.log(`DEBUG: Using WETH9[${ChainId.OPTIMISM}] for token1: ${t1.symbol}`);
+          } else {
+              token1SDK = new Token(ChainId.BASE, ethers.getAddress(t1.address), t1.decimals, t1.symbol, t1.name);
+              console.warn(`WARN: WETH9[${ChainId.OPTIMISM}] not found. Falling back to generic Token for ${t1.symbol}.`);
+          }
+      } else {
+          token1SDK = new Token(ChainId.BASE, ethers.getAddress(t1.address), t1.decimals, t1.symbol, t1.name);
+      }
+
       // Map the numerical fee to FeeAmount enum
       let feeAmountEnum;
       switch (Number(pos.fee)) {
@@ -396,45 +425,6 @@ async function getFormattedPositionData(walletAddress) {
               continue; // Skip this position if fee tier is not supported
       }
 
-      // MODIFIED: Construct Token instances based on whether they are WETH or generic
-      let token0SDK, token1SDK;
-      // Define the canonical Base WETH address for comparison
-      const BASE_WETH_ADDRESS = '0x4200000000000000000000000000000000000006'.toLowerCase();
-
-      // Check if t0 is WETH
-      if (t0.address.toLowerCase() === BASE_WETH_ADDRESS) {
-          token0SDK = WETH9[ChainId.OPTIMISM]; // Use WETH9[10] which maps to Base WETH in this SDK version
-          // Verify it's not undefined for safety if SDK version changes its map
-          if (!token0SDK) {
-              throw new Error(`WETH9[${ChainId.OPTIMISM}] is undefined. SDK might be outdated or WETH9 map changed.`);
-          }
-      } else {
-          token0SDK = new Token(
-              ChainId.BASE, 
-              ethers.getAddress(t0.address), 
-              t0.decimals, 
-              t0.symbol, 
-              t0.name 
-          );
-      }
-
-      // Check if t1 is WETH
-      if (t1.address.toLowerCase() === BASE_WETH_ADDRESS) {
-          token1SDK = WETH9[ChainId.OPTIMISM]; // Use WETH9[10] which maps to Base WETH in this SDK version
-           // Verify it's not undefined for safety
-           if (!token1SDK) {
-              throw new Error(`WETH9[${ChainId.OPTIMISM}] is undefined. SDK might be outdated or WETH9 map changed.`);
-           }
-      } else {
-          token1SDK = new Token(
-              ChainId.BASE, 
-              ethers.getAddress(t1.address), 
-              t1.decimals, 
-              t1.symbol, 
-              t1.name 
-          );
-      }
-      
       let currentNFTPoolAddress;
       try {
           // Pool.getAddress expects tokens to be sorted by address. The SDK internally handles this.
