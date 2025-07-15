@@ -19,8 +19,8 @@ const RENDER_WEBHOOK_URL = process.env.RENDER_WEBHOOK_URL;
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 
 // --- Ethers.js Provider and Contract Addresses ---
-//const provider = new ethers.JsonRpcProvider("https://base-mainnet.infura.io/v3/cceebb32fc834db39318ba89b48471a1");
-const provider = new ethers.JsonRpcProvider("https://base.publicnode.com");
+const provider = new ethers.JsonRpcProvider("https://base-mainnet.infura.io/v3/cceebb32fc834db39318ba89b48471a1");
+
 
 const managerAddress = "0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1";
 const myAddress = "0x2FD24cC510b7a40b176B05A5Bb628d024e3B6886";
@@ -222,7 +222,7 @@ async function getMintEventBlock(manager, tokenId, provider, ownerAddress) {
   console.log(`DEBUG: Starting getMintEventBlock for tokenId: ${tokenId}.`);
   const latestBlock = await provider.getBlockNumber();
   const zeroAddress = "0x0000000000000000000000000000000000000000";
-  // MODIFIED: RPC_QUERY_WINDOW reduced to 2000 for eth_getLogs reliability
+  // MODIFIED: RPC_QUERY_WINDOW set back to 49999 as requested
   const RPC_QUERY_WINDOW = 49999;       
 
   let fromBlock = latestBlock - RPC_QUERY_WINDOW;
@@ -438,7 +438,7 @@ async function getFormattedPositionData(walletAddress) {
           }
       }
 
-      if (!slot0) { // Should be caught by retry loop, but safety check
+      if (!slot0) { 
           responseMessage += `⚠️ Could not get current price data for pool: ${escapeMarkdown(currentNFTPoolAddress)}\n`;
           continue; // Skip this position if slot0 data cannot be found
       }
@@ -455,6 +455,48 @@ async function getFormattedPositionData(walletAddress) {
       let currentPositionStartDate = null;
       let currentPositionInitialPrincipalUSD = 0; 
       let positionHistoryAnalysisSucceeded = false;
+
+      // Calculate principalUSD and totalPositionFeesUSD before attempting historical/fee analysis
+      const [sqrtL, sqrtU] = [
+        tickToSqrtPriceX96(Number(pos.tickLower)),
+        tickToSqrtPriceX96(Number(pos.tickUpper))
+      ];
+      const [raw0, raw1] = getAmountsFromLiquidity(pos.liquidity, sqrtP, sqrtL, sqrtU);
+      const amt0 = parseFloat(formatUnits(raw0, t0.decimals));
+      const amt1 = parseFloat(formatUnits(raw1, t1.decimals));
+
+      let amtWETH = 0, amtUSDC = 0;
+      if (t0.symbol.toUpperCase() === "WETH") {
+        amtWETH = amt0;
+        amtUSDC = amt1;
+      } else {
+        amtWETH = amt1;
+        amtUSDC = amt0;
+      }
+
+      const principalUSD = amtWETH * prices.WETH + amtUSDC * prices.USDC;
+      
+      const xp = await manager.collect.staticCall({
+        tokenId,
+        recipient: walletAddress,
+        amount0Max: UINT128_MAX,
+        amount1Max: UINT128_MAX
+      });
+
+      const fee0 = parseFloat(formatUnits(xp[0], t0.decimals));
+      const fee1 = parseFloat(formatUnits(xp[1], t1.decimals));
+      const feeUSD0 = fee0 * (t0.symbol.toUpperCase() === "WETH" ? prices.WETH : prices.USDC);
+      const feeUSD1 = fee1 * (t1.symbol.toUpperCase() === "WETH" ? prices.WETH : prices.USDC);
+      const totalPositionFeesUSD = feeUSD0 + feeUSD1;
+
+
+      // NEW OPTIMIZATION: Skip further processing if holdings and fees are zero
+      if (principalUSD === 0 && totalPositionFeesUSD === 0) {
+          responseMessage += `\nℹ️ Holdings and fees are zero. Skipping detailed historical and performance analysis.\n`;
+          console.log(`DEBUG: Position ${tokenId} has zero holdings and fees. Skipping further analysis.`);
+          continue; // Skip to next position
+      }
+
 
       // Get mint event and analyze initial investment (uses CoinGecko for historical)
       try {
@@ -517,39 +559,31 @@ async function getFormattedPositionData(walletAddress) {
         console.error(`ERROR: Error in historical analysis for position ${tokenId}: ${error.message}`);
       }
 
-      // Current position analysis
-      const lowerPrice = tickToPricePerToken0(Number(pos.tickLower), Number(t0.decimals), Number(t1.decimals));
-      const upperPrice = tickToPricePerToken0(Number(pos.tickUpper), Number(t0.decimals), Number(t1.decimals));
+      // Current position analysis (moved here so principalUSD is already calculated)
       const currentPrice = tickToPricePerToken0(Number(nativeTick), Number(t0.decimals), Number(t1.decimals));
 
       responseMessage += `\n*Price Information*\n`; // Removed icon
-      // Removed: responseMessage += `🏷️ Tick Range: \`[${pos.tickLower}, ${pos.tickUpper}]\`\n`;
       responseMessage += `🏷️ Range: $${lowerPrice.toFixed(2)} - $${upperPrice.toFixed(2)} ${t1.symbol}/${t0.symbol}\n`; // Changed "Price Range" to "Range" and added label icon
-      // Removed: responseMessage += `🌐 Current Tick: \`${nativeTick}\`\n`;
       responseMessage += `🏷️ Current Price: $${currentPrice.toFixed(2)} ${t1.symbol}/${t0.symbol}\n`; // 2 decimals and added label icon
       
       const inRange = nativeTick >= pos.tickLower && nativeTick < pos.tickUpper;
       responseMessage += `📍 In Range? ${inRange ? "✅ Yes" : "❌ No"}\n`;
 
-      // Calculate current amounts
-      const [sqrtL, sqrtU] = [
-        tickToSqrtPriceX96(Number(pos.tickLower)),
-        tickToSqrtPriceX96(Number(pos.tickUpper))
-      ];
-      const [raw0, raw1] = getAmountsFromLiquidity(pos.liquidity, sqrtP, sqrtL, sqrtU);
-      const amt0 = parseFloat(formatUnits(raw0, t0.decimals));
-      const amt1 = parseFloat(formatUnits(raw1, t1.decimals));
+      // Calculate current amounts (moved outside to use for optimization skip)
+      // const [raw0, raw1] = getAmountsFromLiquidity(pos.liquidity, sqrtP, sqrtL, sqrtU);
+      // const amt0 = parseFloat(formatUnits(raw0, t0.decimals));
+      // const amt1 = parseFloat(formatUnits(raw1, t1.decimals));
 
-      let amtWETH = 0, amtUSDC = 0;
-      if (t0.symbol.toUpperCase() === "WETH") {
-        amtWETH = amt0;
-        amtUSDC = amt1;
-      } else {
-        amtWETH = amt1;
-        amtUSDC = amt0;
-      }
+      // let amtWETH = 0, amtUSDC = 0;
+      // if (t0.symbol.toUpperCase() === "WETH") {
+      //   amtWETH = amt0;
+      //   amtUSDC = amt1;
+      // } else {
+      //   amtWETH = amt1;
+      //   amtUSDC = amt0;
+      // }
 
-      const principalUSD = amtWETH * prices.WETH + amtUSDC * prices.USDC;
+      // const principalUSD = amtWETH * prices.WETH + amtUSDC * prices.USDC;
       totalPortfolioPrincipalUSD += principalUSD; // Accumulate for overall sum excluding fees
 
       const ratio = getRatio(amtWETH * prices.WETH, amtUSDC * prices.USDC);
@@ -566,19 +600,13 @@ async function getFormattedPositionData(walletAddress) {
       }
 
 
-      // Uncollected Fees analysis
-      const xp = await manager.collect.staticCall({
-        tokenId,
-        recipient: walletAddress,
-        amount0Max: UINT128_MAX,
-        amount1Max: UINT128_MAX
-      });
-
-      const fee0 = parseFloat(formatUnits(xp[0], t0.decimals));
-      const fee1 = parseFloat(formatUnits(xp[1], t1.decimals));
-      const feeUSD0 = fee0 * (t0.symbol.toUpperCase() === "WETH" ? prices.WETH : prices.USDC);
-      const feeUSD1 = fee1 * (t1.symbol.toUpperCase() === "WETH" ? prices.WETH : prices.USDC);
-      const totalPositionFeesUSD = feeUSD0 + feeUSD1;
+      // Uncollected Fees analysis (moved to be calculated earlier for optimization skip)
+      // const xp = await manager.collect.staticCall({ ... });
+      // const fee0 = parseFloat(formatUnits(xp[0], t0.decimals));
+      // const fee1 = parseFloat(formatUnits(xp[1], t1.decimals));
+      // const feeUSD0 = fee0 * (...);
+      // const feeUSD1 = fee1 * (...);
+      // const totalPositionFeesUSD = feeUSD0 + feeUSD1;
 
       responseMessage += `\n*Uncollected Fees*\n`; // Removed icon
       responseMessage += `💰 ${formatTokenAmount(fee0, 6)} ${t0.symbol} ($${feeUSD0.toFixed(2)})\n`;
@@ -597,11 +625,11 @@ async function getFormattedPositionData(walletAddress) {
           const feesAPR = (rewardsPerYear / currentPositionInitialPrincipalUSD) * 100;
 
           responseMessage += `\n*Fee Performance*\n`; // Removed icon
-          responseMessage += `💎 Fees per hour: $${rewardsPerHour.toFixed(2)}\n`; // Added diamond icon
-          responseMessage += `💎 Fees per day: $${rewardsPerDay.toFixed(2)}\n`; // Added diamond icon
-          responseMessage += `💎 Fees per month: $${rewardsPerMonth.toFixed(2)}\n`; // Added diamond icon
-          responseMessage += `💎 Fees per year: $${rewardsPerYear.toFixed(2)}\n`; // Added diamond icon
-          responseMessage += `💎 Fees APR: ${feesAPR.toFixed(2)}%\n`; // Added diamond icon
+          responseMessage += `💎 Fees per hour: $${rewardsPerHour.toFixed(2)}\n`; 
+          responseMessage += `💎 Fees per day: $${rewardsPerDay.toFixed(2)}\n`; 
+          responseMessage += `💎 Fees per month: $${rewardsPerMonth.toFixed(2)}\n`; 
+          responseMessage += `💎 Fees per year: $${rewardsPerYear.toFixed(2)}\n`; 
+          responseMessage += `💎 Fees APR: ${feesAPR.toFixed(2)}%\n`; 
       } else {
           responseMessage += `\n⚠️ Could not determine per-position fee performance (initial investment unknown or zero).\n`;
       }
@@ -638,18 +666,18 @@ async function getFormattedPositionData(walletAddress) {
 
         responseMessage += `\n=== *OVERALL PORTFOLIO PERFORMANCE* ===\n`;
         // Removed: Oldest Position and Analysis Period lines
-        responseMessage += `🏛 Initial Investment: $${startPrincipalUSD.toFixed(2)}\n`; // Retained icon
+        responseMessage += `🏛 Initial Investment: $${startPrincipalUSD.toFixed(2)}\n`; 
         responseMessage += `🏛 Total Holdings: $${totalPortfolioPrincipalUSD.toFixed(2)}\n`; // Use totalPortfolioPrincipalUSD
         responseMessage += `📈 Holdings Return: $${totalReturn.toFixed(2)} (${totalReturnPercent.toFixed(2)}%)\n`; // Changed to Holdings Return
         
         responseMessage += `\n*Fee Performance*\n`; // Removed icon
         responseMessage += `💰 Total Fees Earned: $${totalFeeUSD.toFixed(2)}\n`;
         // Removed: Fees per hour/day/month/year lines
-        responseMessage += `💎 Fees APR: ${feesAPR.toFixed(2)}%\n`; // Added diamond icon
+        responseMessage += `💰 Fees APR: ${feesAPR.toFixed(2)}%\n`;
 
         // Corrected All time gains: Principal return + Total Fees Earned
         const allTimeGains = totalReturn + totalFeeUSD; 
-        responseMessage += `\n📈 Total return + Fees: $${allTimeGains.toFixed(2)}\n`; // Changed text and icon
+        responseMessage += `\n📈 Total return + Fees: $${allTimeGains.toFixed(2)}\n`; // Changed text
 
         // Removed: Overall Performance heading and Total APR (incl. price changes) line
         // If you need the overall APR for the total value (principal + fees) again, re-add this explicitly.
@@ -664,6 +692,7 @@ async function getFormattedPositionData(walletAddress) {
     console.error("Error in getFormattedPositionData:", error);
     responseMessage = `An error occurred while fetching liquidity positions: ${escapeMarkdown(error.message)}. Please try again later.`; 
   }
+  return responseMessage;
 }
 
 // --- Express App Setup for Webhook ---
