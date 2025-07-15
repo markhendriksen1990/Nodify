@@ -4,12 +4,10 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
-// Removed Uniswap SDK Pool/Token/ChainId imports not directly used for Pool.getAddress()
-// They may still be indirectly used by other libraries, so if errors appear, might need to re-evaluate.
-// For now, removing to simplify dependencies on their constructor invariants.
-// const { Pool, FeeAmount } = require('@uniswap/v3-sdk');
-// const { Token, WETH9, CurrencyAmount, ChainId } = require('@uniswap/sdk-core');
-// const JSBI = require('jsbi'); 
+// Import Uniswap SDK components (still needed for Token objects, etc.)
+const { Pool, FeeAmount } = require('@uniswap/v3-sdk');
+const { Token, WETH9, CurrencyAmount, ChainId } = require('@uniswap/sdk-core'); 
+const JSBI = require('jsbi'); 
 
 
 // --- Configuration from Environment Variables ---
@@ -23,7 +21,6 @@ const provider = new ethers.JsonRpcProvider("https://base-mainnet.infura.io/v3/c
 
 
 const managerAddress = "0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1";
-// poolAddress is no longer hardcoded
 const myAddress = "0x2FD24cC510b7a40b176B05A5Bb628d024e3B6886";
 
 // Uniswap V3 Factory Address (UPDATED to the address from your working snippet)
@@ -65,7 +62,7 @@ const poolAbi = [
   "function token1() view returns (address)"
 ];
 
-const factoryAbi = [ // Factory ABI for getPool (as per working snippet)
+const factoryAbi = [
   "function getPool(address tokenA, address tokenB, uint24 fee) view returns (address pool)"
 ];
 
@@ -223,7 +220,8 @@ async function getMintEventBlock(manager, tokenId, provider, ownerAddress) {
   console.log(`DEBUG: Starting getMintEventBlock for tokenId: ${tokenId}.`);
   const latestBlock = await provider.getBlockNumber();
   const zeroAddress = "0x0000000000000000000000000000000000000000";
-  const RPC_QUERY_WINDOW = 49999;       
+  // MODIFIED: RPC_QUERY_WINDOW reduced to 2000 for eth_getLogs reliability
+  const RPC_QUERY_WINDOW = 2000;       
 
   let fromBlock = latestBlock - RPC_QUERY_WINDOW;
   let toBlock = latestBlock;
@@ -378,12 +376,12 @@ async function getFormattedPositionData(walletAddress) {
       ]);
       console.log(`DEBUG: Token metadata fetched for pool tokens.`);
 
-      // Dynamically get pool address using factory.getPool() (on-chain call) as per working snippet
+      // Dynamically get pool address via on-chain factory.getPool() call (as per working snippet)
       console.log(`DEBUG: Getting pool address on-chain via factory.getPool() for ${t0.symbol}/${t1.symbol} fee: ${pos.fee}.`);
       
       let currentNFTPoolAddress;
-      const MAX_GETPOOL_RETRIES = 3; // Max retries for getPool
-      const GETPOOL_RETRY_DELAY = 1000; // Delay in ms between retries
+      const MAX_GETPOOL_RETRIES = 3; 
+      const GETPOOL_RETRY_DELAY = 1000; 
 
       for (let attempt = 1; attempt <= MAX_GETPOOL_RETRIES; attempt++) {
           try {
@@ -406,7 +404,7 @@ async function getFormattedPositionData(walletAddress) {
           }
       }
       
-      if (!currentNFTPoolAddress || currentNFTPoolAddress === ethers.ZeroAddress) { // Safety check after retry loop
+      if (!currentNFTPoolAddress || currentNFTPoolAddress === ethers.ZeroAddress) { 
           responseMessage += `⚠️ Could not determine pool address after retries.\n`;
           continue; // Skip this position if pool address cannot be found
       }
