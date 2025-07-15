@@ -4,10 +4,12 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
-// Import Uniswap SDK components (still needed for Token objects, etc.)
-const { Pool, FeeAmount } = require('@uniswap/v3-sdk');
-const { Token, WETH9, CurrencyAmount, ChainId } = require('@uniswap/sdk-core'); 
-const JSBI = require('jsbi'); 
+// Removed Uniswap SDK Pool/Token/ChainId imports not directly used for Pool.getAddress()
+// They may still be indirectly used by other libraries, so if errors appear, might need to re-evaluate.
+// For now, removing to simplify dependencies on their constructor invariants.
+// const { Pool, FeeAmount } = require('@uniswap/v3-sdk');
+// const { Token, WETH9, CurrencyAmount, ChainId } = require('@uniswap/sdk-core');
+// const JSBI = require('jsbi'); 
 
 
 // --- Configuration from Environment Variables ---
@@ -414,7 +416,33 @@ async function getFormattedPositionData(walletAddress) {
       
       // Get slot0 data for this specific pool
       console.log(`DEBUG: Getting slot0 data for pool ${currentNFTPoolAddress}`);
-      const slot0 = await currentNFTPool.slot0();
+      // MODIFIED: Added retry logic for currentNFTPool.slot0()
+      let slot0;
+      const MAX_SLOT0_RETRIES = 3;
+      const SLOT0_RETRY_DELAY = 1000;
+
+      for (let attempt = 1; attempt <= MAX_SLOT0_RETRIES; attempt++) {
+          try {
+              console.log(`DEBUG: Attempt ${attempt} for currentNFTPool.slot0() for pool ${currentNFTPoolAddress}`);
+              slot0 = await currentNFTPool.slot0();
+              console.log(`DEBUG: slot0 data fetched on attempt ${attempt}.`);
+              break; // Success, exit retry loop
+          } catch (e) {
+              console.error(`ERROR: Failed to get slot0 data on attempt ${attempt} for pool ${currentNFTPoolAddress}: ${e.message}`);
+              if (attempt < MAX_SLOT0_RETRIES) {
+                  console.log(`DEBUG: Retrying slot0 in ${SLOT0_RETRY_DELAY}ms...`);
+                  await new Promise(resolve => setTimeout(resolve, SLOT0_RETRY_DELAY));
+              } else {
+                  throw new Error(`Max retries exceeded for slot0: ${e.message}`); // Final failure
+              }
+          }
+      }
+
+      if (!slot0) { // Should be caught by retry loop, but safety check
+          responseMessage += `⚠️ Could not get current price data for pool: ${escapeMarkdown(currentNFTPoolAddress)}\n`;
+          continue; // Skip this position if slot0 data cannot be found
+      }
+      
       const sqrtP = slot0[0];
       const nativeTick = slot0[1];
       console.log(`DEBUG: slot0 data fetched. sqrtPriceX96: ${sqrtP}, tick: ${nativeTick}`);
