@@ -147,7 +147,6 @@ function formatElapsedDaysHours(ms) {
     return `${days} days, ${hours} `;
 }
 
-// ++ UPDATE: getMintEventBlock now includes a retry mechanism ++
 async function getMintEventBlock(manager, tokenId, provider, ownerAddress) {
     const latestBlock = await provider.getBlockNumber();
     const zeroAddress = "0x0000000000000000000000000000000000000000";
@@ -345,19 +344,19 @@ async function getFormattedPositionData(walletAddress) {
                 const histWETHCurrent = await fetchHistoricalPrice('ethereum', dateStrCurrent);
                 const histUSDCCurrent = await fetchHistoricalPrice('usd-coin', dateStrCurrent);
 
-                const [histAmt0Current, histAmt1Current] = getAmountsFromLiquidity(
+                const [histAmt0Current_raw, histAmt1Current_raw] = getAmountsFromLiquidity(
                     pos.liquidity, tickToSqrtPriceX96(Number(pos.tickLower)), tickToSqrtPriceX96(Number(pos.tickLower)), tickToSqrtPriceX96(Number(pos.tickUpper))
                 );
                 let histWETHamtCurrent = 0, histUSDCamtCurrent = 0;
                 if (t0.symbol.toUpperCase() === "WETH") {
-                    histWETHamtCurrent = parseFloat(formatUnits(histAmt0Current, t0.decimals));
-                    histUSDCamtCurrent = parseFloat(formatUnits(histAmt1Current, t1.decimals));
+                    histWETHamtCurrent = parseFloat(formatUnits(histAmt0Current_raw, t0.decimals));
+                    histUSDCamtCurrent = parseFloat(formatUnits(histAmt1Current_raw, t1.decimals));
                 } else {
-                    histWETHamtCurrent = parseFloat(formatUnits(histAmt1Current, t1.decimals));
-                    histUSDCamtCurrent = parseFloat(formatUnits(histAmt0Current, t0.decimals));
+                    histWETHamtCurrent = parseFloat(formatUnits(histAmt1Current_raw, t1.decimals));
+                    histUSDCamtCurrent = parseFloat(formatUnits(histAmt0Current_raw, t0.decimals));
                 }
                 
-                // Add console logs for debugging the initial investment calculation
+                // ++ NEW: Added log lines for debugging ++
                 console.log(`--- Debugging Initial Investment for Token ID: ${tokenId.toString()} ---`);
                 console.log(`Mint Date: ${dateStrCurrent}`);
                 console.log(`Historical WETH Price: $${histWETHCurrent}`);
@@ -366,7 +365,8 @@ async function getFormattedPositionData(walletAddress) {
                 console.log(`Calculated Historical USDC Amount: ${histUSDCamtCurrent}`);
 
                 currentPositionInitialPrincipalUSD = histWETHamtCurrent * histWETHCurrent + histUSDCamtCurrent * histUSDCCurrent;
-                console.log(`Total Initial Investment Calculated: $${currentPositionInitialPrincipalUSD}`);
+                
+                console.log(`Total Initial Investment Calculated: $${currentPositionInitialPrincipalUSD.toFixed(2)}`);
                 console.log('----------------------------------------------------');
 
 
