@@ -344,9 +344,19 @@ async function getFormattedPositionData(walletAddress) {
                 const histWETHCurrent = await fetchHistoricalPrice('ethereum', dateStrCurrent);
                 const histUSDCCurrent = await fetchHistoricalPrice('usd-coin', dateStrCurrent);
 
+                // ++ FIX: Get the historical state of the pool at the mint block to find the price at that time.
+                const historicalSlot0 = await pool.slot0({ blockTag: mintBlock });
+                const historicalTick = historicalSlot0.tick;
+                const historicalSqrtPriceX96 = tickToSqrtPriceX96(historicalTick);
+
+                // ++ FIX: Use the historical price (sqrtPriceX96) to calculate initial amounts, not the lower bound of the range.
                 const [histAmt0Current_raw, histAmt1Current_raw] = getAmountsFromLiquidity(
-                    pos.liquidity, tickToSqrtPriceX96(Number(pos.tickLower)), tickToSqrtPriceX96(Number(pos.tickLower)), tickToSqrtPriceX96(Number(pos.tickUpper))
+                    pos.liquidity,
+                    historicalSqrtPriceX96, // Use the actual price at the time of minting
+                    tickToSqrtPriceX96(Number(pos.tickLower)),
+                    tickToSqrtPriceX96(Number(pos.tickUpper))
                 );
+
                 let histWETHamtCurrent = 0, histUSDCamtCurrent = 0;
                 if (t0.symbol.toUpperCase() === "WETH") {
                     histWETHamtCurrent = parseFloat(formatUnits(histAmt0Current_raw, t0.decimals));
@@ -356,7 +366,6 @@ async function getFormattedPositionData(walletAddress) {
                     histUSDCamtCurrent = parseFloat(formatUnits(histAmt0Current_raw, t0.decimals));
                 }
                 
-                // ++ NEW: Added log lines for debugging ++
                 console.log(`--- Debugging Initial Investment for Token ID: ${tokenId.toString()} ---`);
                 console.log(`Mint Date: ${dateStrCurrent}`);
                 console.log(`Historical WETH Price: $${histWETHCurrent}`);
