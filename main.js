@@ -187,13 +187,15 @@ async function getBlockTimestamp(blockNumber) {
     return block.timestamp * 1000;
 }
 
+// ++ CACHE: This object holds fetched prices to avoid re-fetching for the same date.
 const historicalPriceCache = {};
 let coingeckoHistoricalCooldownUntil = 0;
 
 async function fetchHistoricalPrice(coinId, dateStr) {
     const cacheKey = `${coinId}-${dateStr}`;
+    // ++ CACHE: Check if the price is already in our cache.
     if (historicalPriceCache[cacheKey]) {
-        return historicalPriceCache[cacheKey];
+        return historicalPriceCache[cacheKey]; // Return the cached price.
     }
     if (Date.now() < coingeckoHistoricalCooldownUntil) {
         console.warn(`CoinGecko Historical API still on cooldown. Skipping request for ${cacheKey}.`);
@@ -221,6 +223,7 @@ async function fetchHistoricalPrice(coinId, dateStr) {
             throw new Error(`CoinGecko Historical API returned incomplete data for ${coinId} on ${dateStr}.`);
         }
         const price = data.market_data.current_price.usd || 0;
+        // ++ CACHE: Save the newly fetched price into the cache.
         historicalPriceCache[cacheKey] = price;
         return price;
     } catch (error) {
@@ -253,7 +256,6 @@ async function getFormattedPositionData(walletAddress) {
         let currentTotalPortfolioValue = 0;
         let totalPortfolioPrincipalUSD = 0;
         
-        // ++ NEW: Array to hold the text for each valid position ++
         const positionMessages = [];
 
         for (let i = 0n; i < balance; i++) {
@@ -263,7 +265,6 @@ async function getFormattedPositionData(walletAddress) {
             const dynamicPoolAddress = await factory.getPool(pos.token0, pos.token1, pos.fee);
 
             if (dynamicPoolAddress === ethers.ZeroAddress) {
-                // This position is in a non-existent pool, skip it silently or log it
                 console.warn(`Skipping tokenId ${tokenId.toString()} as no valid pool was found.`);
                 continue;
             }
@@ -298,13 +299,10 @@ async function getFormattedPositionData(walletAddress) {
             const fee0 = parseFloat(formatUnits(xp[0], t0.decimals));
             const fee1 = parseFloat(formatUnits(xp[1], t1.decimals));
 
-            // ++ NEW: Filtering condition ++
-            // If all holdings and fees are zero, skip to the next position
             if (amt0 === 0 && amt1 === 0 && fee0 === 0 && fee1 === 0) {
                 continue;
             }
 
-            // This position is valid, so let's build its message
             let currentPositionMessage = "";
             currentPositionMessage += `\n--- *Position #${i.toString()}* ---\n`;
             currentPositionMessage += `🔹 Token ID: \`${tokenId.toString()}\`\n`;
@@ -432,15 +430,12 @@ async function getFormattedPositionData(walletAddress) {
             totalFeeUSD += totalPositionFeesUSD;
             currentTotalPortfolioValue += currentTotalValue;
             
-            // ++ NEW: Add the fully constructed message for this position to our array ++
             positionMessages.push(currentPositionMessage);
         }
 
-        // ++ NEW: Construct the final response message from the parts ++
         responseMessage = `*👜 Wallet: ${walletAddress.substring(0, 6)}...${walletAddress.substring(38)}*\n\n`;
         responseMessage += `✨ Displaying *${positionMessages.length}* of *${balance.toString()}* total positions with value.\n`;
 
-        // Join all the individual valid position messages
         responseMessage += positionMessages.join('');
 
         if (startDate && startPrincipalUSD !== null && positionMessages.length > 0) {
