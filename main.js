@@ -13,7 +13,7 @@ const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 // --- Ethers.js Provider and Contract Addresses ---
 const provider = new ethers.JsonRpcProvider("https://base-mainnet.infura.io/v3/cceebb32fc834db39318ba89b48471a1");
 
-const managerAddress = "0x03a520b32c04bf3beef7beb72e919cf822ed34f1";
+const managerAddress = "0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1";
 const poolAddress = "0xd0b53D9277642d899DF5C87A3966A349A798F224";
 const myAddress = "0x2FD24cC510b7a40b176B05A5Bb628d024e3B6886";
 
