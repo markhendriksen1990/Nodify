@@ -4,6 +4,14 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
+// Removed Uniswap SDK Pool/Token/ChainId imports not directly used for Pool.getAddress()
+// They may still be indirectly used by other libraries, so if errors appear, might need to re-evaluate.
+// For now, removing to simplify dependencies on their constructor invariants.
+// const { Pool, FeeAmount } = require('@uniswap/v3-sdk');
+// const { Token, WETH9, CurrencyAmount, ChainId } = require('@uniswap/sdk-core');
+// const JSBI = require('jsbi'); 
+
+
 // --- Configuration from Environment Variables ---
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const CHAT_ID = process.env.CHAT_ID;
@@ -11,19 +19,42 @@ const RENDER_WEBHOOK_URL = process.env.RENDER_WEBHOOK_URL;
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 
 // --- Ethers.js Provider and Contract Addresses ---
-//const provider = new ethers.JsonRpcProvider("https://base-mainnet.infura.io/v3/cceebb32fc834db39318ba89b48471a1");
-const provider = new ethers.JsonRpcProvider("https://base.publicnode.com");
+const provider = new ethers.JsonRpcProvider("https://base-mainnet.infura.io/v3/cceebb32fc834db39318ba89b48471a1");
+
 
 const managerAddress = "0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1";
-const poolAddress = "0xd0b53D9277642d899DF5C87A3966A349A798F224";
+// poolAddress is no longer hardcoded
 const myAddress = "0x2FD24cC510b7a40b176B05A5Bb628d024e3B6886";
+
+// Uniswap V3 Factory Address (UPDATED to the address from your working snippet)
+const factoryAddress = "0x33128a8fC17869897dcE68Ed026d694621f6FDfD"; 
 
 // --- ABIs ---
 const managerAbi = [
   "function balanceOf(address owner) view returns (uint256)",
   "function tokenOfOwnerByIndex(address owner, uint256 index) view returns (uint256)",
-  // Corrected 'positions' function signature. This is the canonical signature.
-  "function positions(uint256 tokenId) view returns (uint96 nonce, address operator, address token0, address token1, uint24 fee, int24 tickLower, int24 tickUpper, uint128 liquidity, uint256 feeGrowthInside0LastX128, uint256 feeGrowthInside1LastX128, uint128 tokensOwed0, uint128 tokensOwed1)",
+  {
+    "inputs": [
+      { "internalType": "uint256", "name": "tokenId", "type": "uint256" }
+    ],
+    "name": "positions",
+    "outputs": [
+      { "internalType": "uint96", "name": "nonce", "type": "uint96" },
+      { "internalType": "address", "name": "operator", "type": "address" },
+      { "internalType": "address", "name": "token0", "type": "address" },
+      { "internalType": "address", "name": "token1", "type": "address" },
+      { "internalType": "uint24", "name": "fee", "type": "uint24" },
+      { "internalType": "int24", "name": "tickLower", "type": "int24" },
+      { "internalType": "int24", "name": "tickUpper", "type": "int24" },
+      { "internalType": "uint128", "name": "liquidity", "type": "uint128" },
+      { "internalType": "uint256", "name": "feeGrowthInside0LastX128", "type": "uint256" },
+      { "internalType": "uint256", "name": "feeGrowthInside1LastX128", "type": "uint256" },
+      { "internalType": "uint128", "name": "tokensOwed0", "type": "uint128" },
+      { "internalType": "uint128", "name": "tokensOwed1", "type": "uint128" }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
   "event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)",
   "function collect(tuple(uint256 tokenId, address recipient, uint128 amount0Max, uint128 amount1Max)) external returns (uint256 amount0, uint256 amount1)"
 ];
@@ -34,9 +65,14 @@ const poolAbi = [
   "function token1() view returns (address)"
 ];
 
+const factoryAbi = [ // Factory ABI for getPool (as per working snippet)
+  "function getPool(address tokenA, address tokenB, uint24 fee) view returns (address pool)"
+];
+
 const erc20Abi = [
   "function symbol() view returns (string)",
-  "function decimals() view returns (uint8)"
+  "function decimals() view returns (uint8)",
+  "function name() view returns (string)" 
 ];
 
 const UINT128_MAX = "340282366920938463463374607431768211455";
@@ -80,32 +116,47 @@ function getAmountsFromLiquidity(liquidity, sqrtPriceX96, sqrtLowerX96, sqrtUppe
   return [amount0, amount1];
 }
 
+// MODIFIED: getTokenMeta to ensure symbol and name are always non-empty strings
 async function getTokenMeta(addr) {
+  console.log(`DEBUG: Fetching meta for token address: ${addr}`);
   try {
     const t = new ethers.Contract(addr, erc20Abi, provider);
-    const [symbol, decimals] = await Promise.all([t.symbol(), t.decimals()]);
-    return { symbol, decimals, address: addr };
-  } catch {
-    return { symbol: "UNKNOWN", decimals: 18, address: addr };
+    const [fetchedSymbol, fetchedDecimals, fetchedName] = await Promise.all([
+        t.symbol().catch(() => null), 
+        t.decimals().catch(() => null), 
+        t.name().catch(() => null) 
+    ]); 
+
+    // Ensure symbol and name are non-empty strings, and decimals is a number
+    const symbol = fetchedSymbol && typeof fetchedSymbol === 'string' && fetchedSymbol.length > 0 ? fetchedSymbol : "UNKNOWN";
+    const decimals = fetchedDecimals !== null ? fetchedDecimals : 18;
+    const name = fetchedName && typeof fetchedName === 'string' && fetchedName.length > 0 ? fetchedName : symbol; 
+
+    console.log(`DEBUG: Token meta fetched - Symbol: ${symbol}, Decimals: ${decimals}, Name: ${name}`);
+    return { symbol, decimals, address: addr, name: name };
+  } catch(e) {
+    console.error(`ERROR: Failed to get token meta for ${addr}: ${e.message}`);
+    return { symbol: "UNKNOWN", decimals: 18, address: addr, name: "UNKNOWN" };
   }
 }
 
 // getUsdPrices using CoinLore (current prices)
 async function getUsdPrices() {
+  console.log('DEBUG: Attempting to fetch current USD prices from CoinLore.');
   try {
     const res = await fetch("https://api.coinlore.net/api/tickers/"); // CoinLore API for tickers
     
     if (!res.ok) {
-        console.error(`CoinLore API responded with status: ${res.status} ${res.statusText}`);
+        console.error(`ERROR: CoinLore API responded with status: ${res.status} ${res.statusText}`);
         const errorBody = await res.text();
-        console.error(`CoinLore API error body: ${errorBody.substring(0, 200)}...`);
+        console.error(`ERROR: CoinLore API error body: ${errorBody.substring(0, 200)}...`);
         throw new Error(`CoinLore API failed to fetch prices: ${res.status}`);
     }
 
     const d = await res.json();
     
     if (!d || !Array.isArray(d.data)) {
-        console.error("CoinLore API returned unexpected data structure for tickers:", JSON.stringify(d));
+        console.error("ERROR: CoinLore API returned unexpected data structure for tickers:", JSON.stringify(d));
         throw new Error("CoinLore API returned incomplete or malformed price data.");
     }
 
@@ -127,10 +178,10 @@ async function getUsdPrices() {
     if (wethPrice === 0 || usdcPrice === 0) {
         throw new Error("Could not find WETH or USDC prices in CoinLore API response (symbols not found or price_usd missing).");
     }
-
+    console.log(`DEBUG: CoinLore prices fetched - WETH: ${wethPrice}, USDC: ${usdcPrice}`);
     return { WETH: wethPrice, USDC: usdcPrice };
   } catch (error) {
-    console.error(`Failed to get CURRENT USD prices from CoinLore: ${error.message}`);
+    console.error(`ERROR: Failed to get CURRENT USD prices from CoinLore: ${error.message}`);
     // Fallback to default prices if CoinLore fails
     return { WETH: 0, USDC: 1 }; 
   }
@@ -169,6 +220,7 @@ let consecutiveRpcErrors = 0;
 const MAX_CONSECUTIVE_RPC_ERRORS = 2; 
 
 async function getMintEventBlock(manager, tokenId, provider, ownerAddress) {
+  console.log(`DEBUG: Starting getMintEventBlock for tokenId: ${tokenId}.`);
   const latestBlock = await provider.getBlockNumber();
   const zeroAddress = "0x0000000000000000000000000000000000000000";
   const RPC_QUERY_WINDOW = 49999;       
@@ -179,33 +231,41 @@ async function getMintEventBlock(manager, tokenId, provider, ownerAddress) {
 
   while (toBlock >= 0) { 
     if (consecutiveRpcErrors >= MAX_CONSECUTIVE_RPC_ERRORS) {
-        console.error(`Exceeded ${MAX_CONSECUTIVE_RPC_ERRORS} consecutive RPC errors. Aborting getMintEventBlock for tokenId ${tokenId}.`);
+        console.error(`ERROR: Exceeded ${MAX_CONSECUTIVE_RPC_ERRORS} consecutive RPC errors. Aborting getMintEventBlock for tokenId ${tokenId}.`);
         throw new Error(`Too many consecutive RPC errors. Could not find mint event.`);
     }
 
     if (fromBlock < 0) fromBlock = 0; 
     const filter = manager.filters.Transfer(zeroAddress, null, tokenId);
+    console.log(`DEBUG: Querying RPC for Transfer event in block range ${fromBlock}-${toBlock}`);
     try {
       const events = await manager.queryFilter(filter, fromBlock, toBlock);
       const mint = events.find(e => e.args && e.args.to.toLowerCase() === ownerAddress);
       if (mint) {
         consecutiveRpcErrors = 0; 
+        console.log(`DEBUG: Mint event found at block ${mint.blockNumber} for tokenId ${tokenId}.`);
         return mint.blockNumber; 
       }
       consecutiveRpcErrors = 0; 
     } catch (e) {
       consecutiveRpcErrors++; 
-      console.warn(`Error querying block range ${fromBlock}-${toBlock}: ${e.message}. Consecutive errors: ${consecutiveRpcErrors}. Attempting next window.`);
+      console.warn(`WARN: Error querying block range ${fromBlock}-${toBlock}: ${e.message}. Consecutive errors: ${consecutiveRpcErrors}. Attempting next window.`);
     }
     toBlock = fromBlock - 1;
     fromBlock = toBlock - RPC_QUERY_WINDOW; 
   }
+  console.log(`DEBUG: Mint event not found for tokenId ${tokenId} after full search.`);
   throw new Error("Mint event not found for tokenId");
 }
 
 // getBlockTimestamp: Defined at top-level for accessibility
 async function getBlockTimestamp(blockNumber) {
+  console.log(`DEBUG: Getting timestamp for block: ${blockNumber}`);
   const block = await provider.getBlock(blockNumber);
+  if (!block) {
+      throw new Error(`Block ${blockNumber} not found.`);
+  }
+  console.log(`DEBUG: Timestamp for block ${blockNumber}: ${new Date(block.timestamp * 1000).toISOString()}`);
   return block.timestamp * 1000; // JS Date expects ms
 }
 
@@ -216,27 +276,29 @@ let coingeckoHistoricalCooldownUntil = 0;
 async function fetchHistoricalPrice(coinId, dateStr) {
   const cacheKey = `${coinId}-${dateStr}`;
   if (historicalPriceCache[cacheKey]) {
+    console.log(`DEBUG: Using cached historical price for ${cacheKey}`);
     return historicalPriceCache[cacheKey];
   }
 
   if (Date.now() < coingeckoHistoricalCooldownUntil) {
-      console.warn(`CoinGecko Historical API still on cooldown. Skipping request for ${cacheKey}.`);
+      console.warn(`WARN: CoinGecko Historical API still on cooldown. Skipping request for ${cacheKey}.`);
       return 0; 
   }
 
+  console.log(`DEBUG: Fetching historical price for ${cacheKey} from CoinGecko.`);
   try {
     const url = `https://api.coingecko.com/api/v3/coins/${coinId}/history?date=${dateStr}`;
     const res = await fetch(url);
 
     if (!res.ok) {
-        console.error(`CoinGecko Historical API responded with status: ${res.status} ${res.statusText}`);
+        console.error(`ERROR: CoinGecko Historical API responded with status: ${res.status} ${res.statusText}`);
         const errorBody = await res.text();
-        console.error(`CoinGecko Historical API error body: ${errorBody.substring(0, 200)}...`);
+        console.error(`ERROR: CoinGecko Historical API error body: ${errorBody.substring(0, 200)}...`);
         if (res.status === 429) {
             const retryAfter = res.headers.get('Retry-After'); 
             const cooldownDuration = (retryAfter ? parseInt(retryAfter) * 1000 : 60 * 1000); 
             coingeckoHistoricalCooldownUntil = Date.now() + cooldownDuration;
-            console.warn(`CoinGecko Historical API rate limit hit. Setting cooldown for ${cooldownDuration / 1000} seconds.`);
+            console.warn(`WARN: CoinGecko Historical API rate limit hit. Setting cooldown for ${cooldownDuration / 1000} seconds.`);
             return 0; 
         }
         throw new Error(`CoinGecko Historical API failed to fetch price for ${coinId} on ${dateStr}: ${res.status}`);
@@ -245,68 +307,124 @@ async function fetchHistoricalPrice(coinId, dateStr) {
     const data = await res.json();
     
     if (!data || !data.market_data || !data.market_data.current_price || !data.market_data.current_price.usd) {
-        console.error(`CoinGecko Historical API returned unexpected data structure for ${coinId} on ${dateStr}:`, JSON.stringify(data));
+        console.error(`ERROR: CoinGecko Historical API returned unexpected data structure for ${coinId} on ${dateStr}:`, JSON.stringify(data));
         throw new Error(`CoinGecko Historical API returned incomplete data for ${coinId} on ${dateStr}.`);
     }
 
     const price = data.market_data.current_price.usd || 0;
     historicalPriceCache[cacheKey] = price; 
+    console.log(`DEBUG: Fetched historical price for ${cacheKey}: ${price}`);
     return price;
   } catch (error) {
-    console.error(`Failed to get HISTORICAL USD price from CoinGecko for ${coinId} on ${dateStr}: ${error.message}`);
+    console.error(`ERROR: Failed to get HISTORICAL USD price from CoinGecko for ${cacheKey}: ${error.message}`);
     return 0; 
   }
 }
 
 // --- Refactored LP Position Data Fetcher ---
 async function getFormattedPositionData(walletAddress) {
+  console.log(`DEBUG: Starting getFormattedPositionData for wallet: ${walletAddress}`);
   let responseMessage = "";
   let prices = { WETH: 0, USDC: 0 }; 
 
   try {
+    // Await provider.getNetwork() to ensure chainId is available
+    const network = await provider.getNetwork(); // Ensure network details are fetched
+    console.log(`DEBUG: Connected to network: ${network.name} (Chain ID: ${network.chainId})`);
+
+
     // Fetch CURRENT prices from CoinLore
+    console.log('DEBUG: Calling getUsdPrices (CoinLore)');
     prices = await getUsdPrices(); 
+    console.log('DEBUG: getUsdPrices (CoinLore) completed.');
 
     const manager = new ethers.Contract(managerAddress, managerAbi, provider);
-    const pool = new ethers.Contract(poolAddress, poolAbi, provider);
+    const factory = new ethers.Contract(factoryAddress, factoryAbi, provider);
 
-    const [balance, slot0, token0Addr, token1Addr] = await Promise.all([
-      manager.balanceOf(walletAddress),
-      pool.slot0(),
-      pool.token0(),
-      pool.token1()
+    console.log(`DEBUG: Getting balanceOf ${walletAddress}`);
+    const [balance] = await Promise.all([
+      manager.balanceOf(walletAddress)
     ]);
-    const sqrtP = slot0[0];
-    const nativeTick = slot0[1];
-
-    const [poolT0, poolT1] = await Promise.all([
-      getTokenMeta(token0Addr),
-      getTokenMeta(token1Addr)
-    ]);
+    console.log(`DEBUG: Wallet has ${balance.toString()} positions.`);
 
     responseMessage += `*👜 Wallet: ${walletAddress.substring(0, 6)}...${walletAddress.substring(38)}*\n\n`;
-    responseMessage += `✨ You own *${balance.toString()}* position(s) in ${poolT0.symbol}/${poolT1.symbol} pool\n`;
+    responseMessage += `✨ You own *${balance.toString()}* position(s) in Uniswap V3 pools\n`; 
 
     if (balance === 0n) {
+      console.log('DEBUG: No positions found. Returning.');
       return responseMessage;
     }
 
     let totalFeeUSD = 0;
-    let startPrincipalUSD = null; // Overall portfolio initial investment
-    let startDate = null; // Overall portfolio oldest position start date
-    let currentTotalPortfolioValue = 0; // Accumulates total value of all positions including fees
-    let totalPortfolioPrincipalUSD = 0; // Accumulates principal value for ALL positions, excluding fees
+    let startPrincipalUSD = null; 
+    let startDate = null; 
+    let currentTotalPortfolioValue = 0; 
+    let totalPortfolioPrincipalUSD = 0; 
 
     for (let i = 0n; i < balance; i++) {
+      console.log(`DEBUG: Processing position #${i.toString()}`);
       responseMessage += `\n--- *Position #${i.toString()}* ---\n`;
       const tokenId = await manager.tokenOfOwnerByIndex(walletAddress, i);
+      console.log(`DEBUG: Token ID: ${tokenId.toString()}`);
       responseMessage += `🔹 Token ID: \`${tokenId.toString()}\`\n`;
-      const pos = await manager.positions(tokenId);
+      
+      console.log(`DEBUG: Calling manager.positions(${tokenId})`);
+      const pos = await manager.positions(tokenId); 
+      console.log(`DEBUG: Position details fetched for tokenId ${tokenId}. pos.token0: ${pos.token0}, pos.token1: ${pos.token1}, pos.fee: ${pos.fee}`);
+
       const [t0, t1] = await Promise.all([
         getTokenMeta(pos.token0),
         getTokenMeta(pos.token1)
       ]);
-      responseMessage += `🔸 Pool: ${t0.symbol}/${t1.symbol}\n`;
+      console.log(`DEBUG: Token metadata fetched for pool tokens.`);
+
+      // Dynamically get pool address using factory.getPool() (on-chain call) as per working snippet
+      console.log(`DEBUG: Getting pool address on-chain via factory.getPool() for ${t0.symbol}/${t1.symbol} fee: ${pos.fee}.`);
+      
+      let currentNFTPoolAddress;
+      const MAX_GETPOOL_RETRIES = 3; // Max retries for getPool
+      const GETPOOL_RETRY_DELAY = 1000; // Delay in ms between retries
+
+      for (let attempt = 1; attempt <= MAX_GETPOOL_RETRIES; attempt++) {
+          try {
+              // Pass original pos.token0, pos.token1 as getPool handles unsorted order
+              console.log(`DEBUG: Attempt ${attempt} for factory.getPool(${t0.address}, ${t1.address}, ${pos.fee})`);
+              currentNFTPoolAddress = await factory.getPool(t0.address, t1.address, pos.fee); 
+              if (currentNFTPoolAddress === ethers.ZeroAddress) {
+                  throw new Error(`Factory returned zero address (pool might not exist) on attempt ${attempt}.`);
+              }
+              console.log(`DEBUG: Pool address found on attempt ${attempt}: ${currentNFTPoolAddress}`);
+              break; // Success, exit retry loop
+          } catch (e) {
+              console.error(`ERROR: Failed to get pool address from factory on attempt ${attempt}: ${e.message}`);
+              if (attempt < MAX_GETPOOL_RETRIES) {
+                  console.log(`DEBUG: Retrying getPool in ${GETPOOL_RETRY_DELAY}ms...`);
+                  await new Promise(resolve => setTimeout(resolve, GETPOOL_RETRY_DELAY));
+              } else {
+                  throw new Error(`Max retries exceeded for getPool: ${e.message}`); // Final failure
+              }
+          }
+      }
+      
+      if (!currentNFTPoolAddress || currentNFTPoolAddress === ethers.ZeroAddress) { // Safety check after retry loop
+          responseMessage += `⚠️ Could not determine pool address after retries.\n`;
+          continue; // Skip this position if pool address cannot be found
+      }
+      
+      // Instantiate a new pool contract for this specific NFT's pool
+      const currentNFTPool = new ethers.Contract(currentNFTPoolAddress, poolAbi, provider);
+      
+      // Get slot0 data for this specific pool
+      console.log(`DEBUG: Getting slot0 data for pool ${currentNFTPoolAddress}`);
+      const slot0 = await currentNFTPool.slot0();
+      const sqrtP = slot0[0];
+      const nativeTick = slot0[1];
+      console.log(`DEBUG: slot0 data fetched. sqrtPriceX96: ${sqrtP}, tick: ${nativeTick}`);
+
+
+      responseMessage += `🔸 Pool: ${t0.symbol}/${t1.symbol} (${(Number(pos.fee) / 10000).toFixed(2)}%)`; // Add fee tier to pool display
+      responseMessage += `\n🔸 Pool Address: \`${currentNFTPoolAddress}\`\n`; // Display pool address for verification
+
 
       let currentPositionStartDate = null;
       let currentPositionInitialPrincipalUSD = 0; 
@@ -314,7 +432,9 @@ async function getFormattedPositionData(walletAddress) {
 
       // Get mint event and analyze initial investment (uses CoinGecko for historical)
       try {
+        console.log(`DEBUG: Attempting to get mint block for tokenId ${tokenId}.`);
         const mintBlock = await getMintEventBlock(manager, tokenId, provider, walletAddress);
+        console.log(`DEBUG: Mint block for tokenId ${tokenId}: ${mintBlock}`);
         const startTimestampMs = await getBlockTimestamp(mintBlock);
         currentPositionStartDate = new Date(startTimestampMs);
         
@@ -329,8 +449,11 @@ async function getFormattedPositionData(walletAddress) {
         const yearCurrent = currentPositionStartDate.getFullYear();
         const dateStrCurrent = `${dayCurrent}-${monthCurrent}-${yearCurrent}`;
         
+        console.log(`DEBUG: Fetching historical WETH for ${dateStrCurrent}`);
         const histWETHCurrent = await fetchHistoricalPrice('ethereum', dateStrCurrent);
+        console.log(`DEBUG: Fetching historical USDC for ${dateStrCurrent}`);
         const histUSDCCurrent = await fetchHistoricalPrice('usd-coin', dateStrCurrent);
+        console.log(`DEBUG: Historical prices fetched. WETH: ${histWETHCurrent}, USDC: ${histUSDCCurrent}`);
 
         const [histAmt0Current, histAmt1Current] = getAmountsFromLiquidity(
             pos.liquidity,
@@ -365,6 +488,7 @@ async function getFormattedPositionData(walletAddress) {
         responseMessage += `💰 Initial Investment: $${currentPositionInitialPrincipalUSD.toFixed(2)}\n`; 
       } catch (error) {
         responseMessage += `⚠️ Could not analyze position history: ${escapeMarkdown(error.message)}\n`; // Escaped error message
+        console.error(`ERROR: Error in historical analysis for position ${tokenId}: ${error.message}`);
       }
 
       // Current position analysis
@@ -374,9 +498,9 @@ async function getFormattedPositionData(walletAddress) {
 
       responseMessage += `\n*Price Information*\n`; // Removed icon
       // Removed: responseMessage += `🏷️ Tick Range: \`[${pos.tickLower}, ${pos.tickUpper}]\`\n`;
-      responseMessage += `Range: $${lowerPrice.toFixed(2)} - $${upperPrice.toFixed(2)} ${t1.symbol}/${t0.symbol}\n`; // Changed "Price Range" to "Range"
+      responseMessage += `🏷️ Range: $${lowerPrice.toFixed(2)} - $${upperPrice.toFixed(2)} ${t1.symbol}/${t0.symbol}\n`; // Changed "Price Range" to "Range" and added label icon
       // Removed: responseMessage += `🌐 Current Tick: \`${nativeTick}\`\n`;
-      responseMessage += `🌐 Current Price: $${currentPrice.toFixed(2)} ${t1.symbol}/${t0.symbol}\n`; // 2 decimals
+      responseMessage += `🏷️ Current Price: $${currentPrice.toFixed(2)} ${t1.symbol}/${t0.symbol}\n`; // 2 decimals and added label icon
       
       const inRange = nativeTick >= pos.tickLower && nativeTick < pos.tickUpper;
       responseMessage += `📍 In Range? ${inRange ? "✅ Yes" : "❌ No"}\n`;
@@ -416,7 +540,7 @@ async function getFormattedPositionData(walletAddress) {
       }
 
 
-      // Uncollected fees analysis
+      // Uncollected Fees analysis
       const xp = await manager.collect.staticCall({
         tokenId,
         recipient: walletAddress,
@@ -433,7 +557,8 @@ async function getFormattedPositionData(walletAddress) {
       responseMessage += `\n*Uncollected Fees*\n`; // Removed icon
       responseMessage += `💰 ${formatTokenAmount(fee0, 6)} ${t0.symbol} ($${feeUSD0.toFixed(2)})\n`;
       responseMessage += `💰 ${formatTokenAmount(fee1, 2)} ${t1.symbol} ($${feeUSD1.toFixed(2)})\n`;
-      responseMessage += `💰 Total Fees: *$${totalPositionFeesUSD.toFixed(2)}*\n`;
+      responseMessage += `💰 Total Fees: *$${totalPositionFeesUSD.toFixed(2)}*\n`; // Add Total Fees to Uncollected Fees
+
 
       // Per-Position Fee Performance (uses currentPositionStartDate and currentPositionInitialPrincipalUSD)
       if (positionHistoryAnalysisSucceeded && currentPositionInitialPrincipalUSD !== null && currentPositionInitialPrincipalUSD > 0) {
@@ -446,11 +571,11 @@ async function getFormattedPositionData(walletAddress) {
           const feesAPR = (rewardsPerYear / currentPositionInitialPrincipalUSD) * 100;
 
           responseMessage += `\n*Fee Performance*\n`; // Removed icon
-          responseMessage += `💰 Fees per hour: $${rewardsPerHour.toFixed(2)}\n`;
-          responseMessage += `💰 Fees per day: $${rewardsPerDay.toFixed(2)}\n`;
-          responseMessage += `💰 Fees per month: $${rewardsPerMonth.toFixed(2)}\n`;
-          responseMessage += `💰 Fees per year: $${rewardsPerYear.toFixed(2)}\n`;
-          responseMessage += `💰 Fees APR: ${feesAPR.toFixed(2)}%\n`;
+          responseMessage += `💎 Fees per hour: $${rewardsPerHour.toFixed(2)}\n`; // Added diamond icon
+          responseMessage += `💎 Fees per day: $${rewardsPerDay.toFixed(2)}\n`; // Added diamond icon
+          responseMessage += `💎 Fees per month: $${rewardsPerMonth.toFixed(2)}\n`; // Added diamond icon
+          responseMessage += `💎 Fees per year: $${rewardsPerYear.toFixed(2)}\n`; // Added diamond icon
+          responseMessage += `💎 Fees APR: ${feesAPR.toFixed(2)}%\n`; // Added diamond icon
       } else {
           responseMessage += `\n⚠️ Could not determine per-position fee performance (initial investment unknown or zero).\n`;
       }
@@ -459,7 +584,6 @@ async function getFormattedPositionData(walletAddress) {
       responseMessage += `\n🏦 Position Value: *$${currentTotalValue.toFixed(2)}*\n`; // Changed to Position Value
 
       // NEW: Position Total return + Fees
-      // This calculates the return + fees for this specific position
       const positionReturn = principalUSD - currentPositionInitialPrincipalUSD; // Principal gain/loss for this position
       const positionTotalGains = positionReturn + totalPositionFeesUSD; // Total gain including fees for this position
       if (positionHistoryAnalysisSucceeded && currentPositionInitialPrincipalUSD > 0) {
@@ -488,18 +612,18 @@ async function getFormattedPositionData(walletAddress) {
 
         responseMessage += `\n=== *OVERALL PORTFOLIO PERFORMANCE* ===\n`;
         // Removed: Oldest Position and Analysis Period lines
-        responseMessage += `🏛 Initial Investment: $${startPrincipalUSD.toFixed(2)}\n`;
+        responseMessage += `🏛 Initial Investment: $${startPrincipalUSD.toFixed(2)}\n`; // Retained icon
         responseMessage += `🏛 Total Holdings: $${totalPortfolioPrincipalUSD.toFixed(2)}\n`; // Use totalPortfolioPrincipalUSD
-        responseMessage += `📈 Holdings Change: $${totalReturn.toFixed(2)} (${totalReturnPercent.toFixed(2)}%)\n`; // Changed to Holdings Return
+        responseMessage += `📈 Holdings Return: $${totalReturn.toFixed(2)} (${totalReturnPercent.toFixed(2)}%)\n`; // Changed to Holdings Return
         
         responseMessage += `\n*Fee Performance*\n`; // Removed icon
         responseMessage += `💰 Total Fees Earned: $${totalFeeUSD.toFixed(2)}\n`;
         // Removed: Fees per hour/day/month/year lines
-        responseMessage += `💰 Fees APR: ${feesAPR.toFixed(2)}%\n`;
+        responseMessage += `💎 Fees APR: ${feesAPR.toFixed(2)}%\n`; // Added diamond icon
 
         // Corrected All time gains: Principal return + Total Fees Earned
         const allTimeGains = totalReturn + totalFeeUSD; 
-        responseMessage += `\n📈 Total return + Fees: $${allTimeGains.toFixed(2)}\n`; // Changed text
+        responseMessage += `\n📈 Total return + Fees: $${allTimeGains.toFixed(2)}\n`; // Changed text and icon
 
         // Removed: Overall Performance heading and Total APR (incl. price changes) line
         // If you need the overall APR for the total value (principal + fees) again, re-add this explicitly.
@@ -514,7 +638,6 @@ async function getFormattedPositionData(walletAddress) {
     console.error("Error in getFormattedPositionData:", error);
     responseMessage = `An error occurred while fetching liquidity positions: ${escapeMarkdown(error.message)}. Please try again later.`; 
   }
-  return responseMessage;
 }
 
 // --- Express App Setup for Webhook ---
