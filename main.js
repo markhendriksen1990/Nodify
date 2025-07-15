@@ -45,8 +45,6 @@ const { formatUnits } = ethers;
 
 // --- Utility Functions ---
 
-// -- REMOVED: escapeMarkdown function is no longer needed with legacy 'Markdown' parse mode.
-
 function tickToSqrtPriceX96(tick) {
     const ratio = Math.pow(1.0001, Number(tick));
     const product = Math.sqrt(ratio) * (2 ** 96);
@@ -202,7 +200,7 @@ async function fetchHistoricalPrice(coinId, dateStr) {
         return 0;
     }
     try {
-        const url = `https://api.coingecko.com/api/v3/coins/${coinId}/history?date=${dateStr}&x_cg_demo_api_key=CG-UVFFYYLSfEA26y4Dd31pYcLL`;
+        const url = `https://api.coingecko.com/api/v3/coins/${coinId}/history?date=${dateStr}`;
         const res = await fetch(url);
         if (!res.ok) {
             console.error(`CoinGecko Historical API responded with status: ${res.status} ${res.statusText}`);
@@ -245,11 +243,8 @@ async function getFormattedPositionData(walletAddress) {
 
         const balance = await manager.balanceOf(walletAddress);
 
-        responseMessage += `*👜 Wallet: ${walletAddress.substring(0, 6)}...${walletAddress.substring(38)}*\n\n`;
-        responseMessage += `✨ You own *${balance.toString()}* Uniswap V3 position(s).\n`;
-
         if (balance === 0n) {
-            return responseMessage;
+            return `*👜 Wallet: ${walletAddress.substring(0, 6)}...${walletAddress.substring(38)}*\n\n✨ You own *0* Uniswap V3 positions.`;
         }
 
         let totalFeeUSD = 0;
@@ -257,6 +252,9 @@ async function getFormattedPositionData(walletAddress) {
         let startDate = null;
         let currentTotalPortfolioValue = 0;
         let totalPortfolioPrincipalUSD = 0;
+        
+        // ++ NEW: Array to hold the text for each valid position ++
+        const positionMessages = [];
 
         for (let i = 0n; i < balance; i++) {
             const tokenId = await manager.tokenOfOwnerByIndex(walletAddress, i);
@@ -265,9 +263,8 @@ async function getFormattedPositionData(walletAddress) {
             const dynamicPoolAddress = await factory.getPool(pos.token0, pos.token1, pos.fee);
 
             if (dynamicPoolAddress === ethers.ZeroAddress) {
-                responseMessage += `\n--- *Position #${i.toString()}* ---\n`;
-                responseMessage += `🔹 Token ID: \`${tokenId.toString()}\`\n`;
-                responseMessage += `⚠️ Could not find a valid pool for this position. Skipping.\n`;
+                // This position is in a non-existent pool, skip it silently or log it
+                console.warn(`Skipping tokenId ${tokenId.toString()} as no valid pool was found.`);
                 continue;
             }
             
@@ -286,10 +283,32 @@ async function getFormattedPositionData(walletAddress) {
                 getTokenMeta(token0Addr),
                 getTokenMeta(token1Addr)
             ]);
-            
-            responseMessage += `\n--- *Position #${i.toString()}* ---\n`;
-            responseMessage += `🔹 Token ID: \`${tokenId.toString()}\`\n`;
-            responseMessage += `🔸 Pool: ${t0.symbol}/${t1.symbol} (${Number(pos.fee)/10000}% fee)\n`;
+
+            const [sqrtL, sqrtU] = [
+                tickToSqrtPriceX96(Number(pos.tickLower)),
+                tickToSqrtPriceX96(Number(pos.tickUpper))
+            ];
+            const [raw0, raw1] = getAmountsFromLiquidity(pos.liquidity, sqrtP, sqrtL, sqrtU);
+            const amt0 = parseFloat(formatUnits(raw0, t0.decimals));
+            const amt1 = parseFloat(formatUnits(raw1, t1.decimals));
+
+            const xp = await manager.collect.staticCall({
+                tokenId, recipient: walletAddress, amount0Max: UINT128_MAX, amount1Max: UINT128_MAX
+            });
+            const fee0 = parseFloat(formatUnits(xp[0], t0.decimals));
+            const fee1 = parseFloat(formatUnits(xp[1], t1.decimals));
+
+            // ++ NEW: Filtering condition ++
+            // If all holdings and fees are zero, skip to the next position
+            if (amt0 === 0 && amt1 === 0 && fee0 === 0 && fee1 === 0) {
+                continue;
+            }
+
+            // This position is valid, so let's build its message
+            let currentPositionMessage = "";
+            currentPositionMessage += `\n--- *Position #${i.toString()}* ---\n`;
+            currentPositionMessage += `🔹 Token ID: \`${tokenId.toString()}\`\n`;
+            currentPositionMessage += `🔸 Pool: ${t0.symbol}/${t1.symbol} (${Number(pos.fee)/10000}% fee)\n`;
 
             let currentPositionStartDate = null;
             let currentPositionInitialPrincipalUSD = 0;
@@ -313,13 +332,9 @@ async function getFormattedPositionData(walletAddress) {
                 const histUSDCCurrent = await fetchHistoricalPrice('usd-coin', dateStrCurrent);
 
                 const [histAmt0Current, histAmt1Current] = getAmountsFromLiquidity(
-                    pos.liquidity,
-                    tickToSqrtPriceX96(Number(pos.tickLower)),
-                    tickToSqrtPriceX96(Number(pos.tickLower)),
-                    tickToSqrtPriceX96(Number(pos.tickUpper))
+                    pos.liquidity, tickToSqrtPriceX96(Number(pos.tickLower)), tickToSqrtPriceX96(Number(pos.tickLower)), tickToSqrtPriceX96(Number(pos.tickUpper))
                 );
-                let histWETHamtCurrent = 0,
-                    histUSDCamtCurrent = 0;
+                let histWETHamtCurrent = 0, histUSDCamtCurrent = 0;
                 if (t0.symbol.toUpperCase() === "WETH") {
                     histWETHamtCurrent = parseFloat(formatUnits(histAmt0Current, t0.decimals));
                     histUSDCamtCurrent = parseFloat(formatUnits(histAmt1Current, t1.decimals));
@@ -337,39 +352,28 @@ async function getFormattedPositionData(walletAddress) {
                     startPrincipalUSD = currentPositionInitialPrincipalUSD;
                 }
 
-                responseMessage += `📅 Created: ${currentPositionStartDate.toISOString().replace('T', ' ').slice(0, 19)}\n`;
-                responseMessage += `💰 Initial Investment: $${currentPositionInitialPrincipalUSD.toFixed(2)}\n`;
+                currentPositionMessage += `📅 Created: ${currentPositionStartDate.toISOString().replace('T', ' ').slice(0, 19)}\n`;
+                currentPositionMessage += `💰 Initial Investment: $${currentPositionInitialPrincipalUSD.toFixed(2)}\n`;
             } catch (error) {
-                responseMessage += `⚠️ Could not analyze position history: ${error.message}\n`;
+                currentPositionMessage += `⚠️ Could not analyze position history: ${error.message}\n`;
             }
 
             const lowerPrice = tickToPricePerToken0(Number(pos.tickLower), Number(t0.decimals), Number(t1.decimals));
             const upperPrice = tickToPricePerToken0(Number(pos.tickUpper), Number(t0.decimals), Number(t1.decimals));
             const currentPrice = tickToPricePerToken0(Number(nativeTick), Number(t0.decimals), Number(t1.decimals));
 
-            responseMessage += `\n*Price Information*\n`;
-            responseMessage += `Range: $${lowerPrice.toFixed(2)} - $${upperPrice.toFixed(2)} ${t1.symbol}/${t0.symbol}\n`;
-            responseMessage += `🌐 Current Price: $${currentPrice.toFixed(2)} ${t1.symbol}/${t0.symbol}\n`;
+            currentPositionMessage += `\n*Price Information*\n`;
+            currentPositionMessage += `Range: $${lowerPrice.toFixed(2)} - $${upperPrice.toFixed(2)} ${t1.symbol}/${t0.symbol}\n`;
+            currentPositionMessage += `🌐 Current Price: $${currentPrice.toFixed(2)} ${t1.symbol}/${t0.symbol}\n`;
 
             const inRange = nativeTick >= pos.tickLower && nativeTick < pos.tickUpper;
-            responseMessage += `📍 In Range? ${inRange ? "✅ Yes" : "❌ No"}\n`;
-
-            const [sqrtL, sqrtU] = [
-                tickToSqrtPriceX96(Number(pos.tickLower)),
-                tickToSqrtPriceX96(Number(pos.tickUpper))
-            ];
-            const [raw0, raw1] = getAmountsFromLiquidity(pos.liquidity, sqrtP, sqrtL, sqrtU);
-            const amt0 = parseFloat(formatUnits(raw0, t0.decimals));
-            const amt1 = parseFloat(formatUnits(raw1, t1.decimals));
-
-            let amtWETH = 0,
-                amtUSDC = 0;
+            currentPositionMessage += `📍 In Range? ${inRange ? "✅ Yes" : "❌ No"}\n`;
+            
+            let amtWETH = 0, amtUSDC = 0;
             if (t0.symbol.toUpperCase() === "WETH") {
-                amtWETH = amt0;
-                amtUSDC = amt1;
+                amtWETH = amt0; amtUSDC = amt1;
             } else {
-                amtWETH = amt1;
-                amtUSDC = amt0;
+                amtWETH = amt1; amtUSDC = amt0;
             }
 
             const principalUSD = amtWETH * prices.WETH + amtUSDC * prices.USDC;
@@ -377,34 +381,25 @@ async function getFormattedPositionData(walletAddress) {
 
             const ratio = getRatio(amtWETH * prices.WETH, amtUSDC * prices.USDC);
 
-            responseMessage += `\n*Current Holdings*\n`;
-            responseMessage += `🏛 ${formatTokenAmount(amtWETH, 6)} WETH ($${(amtWETH * prices.WETH).toFixed(2)})\n`;
-            responseMessage += `🏛 ${formatTokenAmount(amtUSDC, 2)} USDC ($${(amtUSDC * prices.USDC).toFixed(2)})\n`;
-            responseMessage += `🏛 Ratio: WETH/USDC ${ratio.weth}/${ratio.usdc}%\n`;
-            responseMessage += `🏛 Holdings: *$${principalUSD.toFixed(2)}*\n`;
+            currentPositionMessage += `\n*Current Holdings*\n`;
+            currentPositionMessage += `🏛 ${formatTokenAmount(amtWETH, 6)} WETH ($${(amtWETH * prices.WETH).toFixed(2)})\n`;
+            currentPositionMessage += `🏛 ${formatTokenAmount(amtUSDC, 2)} USDC ($${(amtUSDC * prices.USDC).toFixed(2)})\n`;
+            currentPositionMessage += `🏛 Ratio: WETH/USDC ${ratio.weth}/${ratio.usdc}%\n`;
+            currentPositionMessage += `🏛 Holdings: *$${principalUSD.toFixed(2)}*\n`;
 
             const positionHoldingsChange = principalUSD - currentPositionInitialPrincipalUSD;
             if (positionHistoryAnalysisSucceeded && currentPositionInitialPrincipalUSD > 0) {
-                responseMessage += `📈 Holdings change: $${positionHoldingsChange.toFixed(2)}\n`;
+                currentPositionMessage += `📈 Holdings change: $${positionHoldingsChange.toFixed(2)}\n`;
             }
-
-            const xp = await manager.collect.staticCall({
-                tokenId,
-                recipient: walletAddress,
-                amount0Max: UINT128_MAX,
-                amount1Max: UINT128_MAX
-            });
-
-            const fee0 = parseFloat(formatUnits(xp[0], t0.decimals));
-            const fee1 = parseFloat(formatUnits(xp[1], t1.decimals));
+            
             const feeUSD0 = fee0 * (t0.symbol.toUpperCase() === "WETH" ? prices.WETH : prices.USDC);
             const feeUSD1 = fee1 * (t1.symbol.toUpperCase() === "WETH" ? prices.WETH : prices.USDC);
             const totalPositionFeesUSD = feeUSD0 + feeUSD1;
 
-            responseMessage += `\n*Uncollected Fees*\n`;
-            responseMessage += `💰 ${formatTokenAmount(fee0, 6)} ${t0.symbol} ($${feeUSD0.toFixed(2)})\n`;
-            responseMessage += `💰 ${formatTokenAmount(fee1, 2)} ${t1.symbol} ($${feeUSD1.toFixed(2)})\n`;
-            responseMessage += `💰 Total Fees: *$${totalPositionFeesUSD.toFixed(2)}*\n`;
+            currentPositionMessage += `\n*Uncollected Fees*\n`;
+            currentPositionMessage += `💰 ${formatTokenAmount(fee0, 6)} ${t0.symbol} ($${feeUSD0.toFixed(2)})\n`;
+            currentPositionMessage += `💰 ${formatTokenAmount(fee1, 2)} ${t1.symbol} ($${feeUSD1.toFixed(2)})\n`;
+            currentPositionMessage += `💰 Total Fees: *$${totalPositionFeesUSD.toFixed(2)}*\n`;
 
             if (positionHistoryAnalysisSucceeded && currentPositionInitialPrincipalUSD !== null && currentPositionInitialPrincipalUSD > 0) {
                 const now = new Date();
@@ -415,43 +410,49 @@ async function getFormattedPositionData(walletAddress) {
                 const rewardsPerYear = rewardsPerDay * 365.25;
                 const feesAPR = (rewardsPerYear / currentPositionInitialPrincipalUSD) * 100;
 
-                responseMessage += `\n*Fee Performance*\n`;
-                responseMessage += `💰 Fees per hour: $${rewardsPerHour.toFixed(2)}\n`;
-                responseMessage += `💰 Fees per day: $${rewardsPerDay.toFixed(2)}\n`;
-                responseMessage += `💰 Fees per month: $${rewardsPerMonth.toFixed(2)}\n`;
-                responseMessage += `💰 Fees per year: $${rewardsPerYear.toFixed(2)}\n`;
-                responseMessage += `💰 Fees APR: ${feesAPR.toFixed(2)}%\n`;
+                currentPositionMessage += `\n*Fee Performance*\n`;
+                currentPositionMessage += `💰 Fees per hour: $${rewardsPerHour.toFixed(2)}\n`;
+                currentPositionMessage += `💰 Fees per day: $${rewardsPerDay.toFixed(2)}\n`;
+                currentPositionMessage += `💰 Fees per month: $${rewardsPerMonth.toFixed(2)}\n`;
+                currentPositionMessage += `💰 Fees per year: $${rewardsPerYear.toFixed(2)}\n`;
+                currentPositionMessage += `💰 Fees APR: ${feesAPR.toFixed(2)}%\n`;
             } else {
-                responseMessage += `\n⚠️ Could not determine per-position fee performance (initial investment unknown or zero).\n`;
+                currentPositionMessage += `\n⚠️ Could not determine per-position fee performance (initial investment unknown or zero).\n`;
             }
 
             const currentTotalValue = principalUSD + totalPositionFeesUSD;
-            responseMessage += `\n🏦 Position Value: *$${currentTotalValue.toFixed(2)}*\n`;
+            currentPositionMessage += `\n🏦 Position Value: *$${currentTotalValue.toFixed(2)}*\n`;
 
             const positionReturn = principalUSD - currentPositionInitialPrincipalUSD;
             const positionTotalGains = positionReturn + totalPositionFeesUSD;
             if (positionHistoryAnalysisSucceeded && currentPositionInitialPrincipalUSD > 0) {
-                responseMessage += `📈 Position Total return + Fees: $${positionTotalGains.toFixed(2)}\n`;
+                currentPositionMessage += `📈 Position Total return + Fees: $${positionTotalGains.toFixed(2)}\n`;
             }
 
-            totalFeeUSD += (feeUSD0 + feeUSD1);
+            totalFeeUSD += totalPositionFeesUSD;
             currentTotalPortfolioValue += currentTotalValue;
+            
+            // ++ NEW: Add the fully constructed message for this position to our array ++
+            positionMessages.push(currentPositionMessage);
         }
 
-        if (startDate && startPrincipalUSD !== null) {
+        // ++ NEW: Construct the final response message from the parts ++
+        responseMessage = `*👜 Wallet: ${walletAddress.substring(0, 6)}...${walletAddress.substring(38)}*\n\n`;
+        responseMessage += `✨ Displaying *${positionMessages.length}* of *${balance.toString()}* total positions with value.\n`;
+
+        // Join all the individual valid position messages
+        responseMessage += positionMessages.join('');
+
+        if (startDate && startPrincipalUSD !== null && positionMessages.length > 0) {
             const now = new Date();
             const elapsedMs = now.getTime() - startDate.getTime();
-            const rewardsPerHour = elapsedMs > 0 ? totalFeeUSD / (elapsedMs / 1000 / 60 / 60) : 0;
-            const rewardsPerDay = rewardsPerHour * 24;
-            const rewardsPerMonth = rewardsPerDay * 30.44;
-            const rewardsPerYear = rewardsPerDay * 365.25;
-
+            const rewardsPerYear = elapsedMs > 0 ? totalFeeUSD * (365.25 * 24 * 60 * 60 * 1000) / elapsedMs : 0;
             const totalReturn = totalPortfolioPrincipalUSD - startPrincipalUSD;
             const totalReturnPercent = (totalReturn / startPrincipalUSD) * 100;
-
             const feesAPR = (rewardsPerYear / startPrincipalUSD) * 100;
 
             responseMessage += `\n=== *OVERALL PORTFOLIO PERFORMANCE* ===\n`;
+            responseMessage += `(Based on the *${positionMessages.length}* displayed position(s))\n`;
             responseMessage += `🏛 Initial Investment: $${startPrincipalUSD.toFixed(2)}\n`;
             responseMessage += `🏛 Total Holdings: $${totalPortfolioPrincipalUSD.toFixed(2)}\n`;
             responseMessage += `📈 Holdings Change: $${totalReturn.toFixed(2)} (${totalReturnPercent.toFixed(2)}%)\n`;
@@ -462,13 +463,12 @@ async function getFormattedPositionData(walletAddress) {
 
             const allTimeGains = totalReturn + totalFeeUSD;
             responseMessage += `\n📈 Total return + Fees: $${allTimeGains.toFixed(2)}\n`;
-        } else {
-            responseMessage += `\n❌ Coingecko API might be on cooldown. Could not determine start date or initial investment.\n`;
+        } else if (positionMessages.length > 0) {
+            responseMessage += `\n⚠️ Could not determine overall portfolio performance (initial investment unknown).\n`;
         }
 
     } catch (error) {
         console.error("Error in getFormattedPositionData:", error);
-        // Removed the escapeMarkdown call as it's no longer needed
         responseMessage = `An error occurred while fetching liquidity positions: ${error.message}. Please try again later.`;
     }
     return responseMessage;
@@ -524,7 +524,6 @@ async function sendMessage(chatId, text) {
             body: JSON.stringify({
                 chat_id: chatId,
                 text: text,
-                // ++ FIX: Reverted to legacy 'Markdown' mode to avoid strict character escaping rules ++
                 parse_mode: 'Markdown',
                 disable_web_page_preview: true
             })
