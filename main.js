@@ -216,14 +216,15 @@ function formatElapsedDaysHours(ms) {
 
 // getMintEventBlock using 49999 block query window as requested
 let consecutiveRpcErrors = 0; 
-const MAX_CONSECUTIVE_RPC_ERRORS = 2; 
+// MODIFIED: MAX_CONSECUTIVE_RPC_ERRORS to 8
+const MAX_CONSECUTIVE_RPC_ERRORS = 8; 
 
 async function getMintEventBlock(manager, tokenId, provider, ownerAddress) {
   console.log(`DEBUG: Starting getMintEventBlock for tokenId: ${tokenId}.`);
   const latestBlock = await provider.getBlockNumber();
   const zeroAddress = "0x0000000000000000000000000000000000000000";
-  // MODIFIED: RPC_QUERY_WINDOW reduced to 2000 for eth_getLogs reliability
-  const RPC_QUERY_WINDOW = 2000;       
+  // MODIFIED: RPC_QUERY_WINDOW to 49999 as requested
+  const RPC_QUERY_WINDOW = 49999;       
 
   let fromBlock = latestBlock - RPC_QUERY_WINDOW;
   let toBlock = latestBlock;
@@ -260,12 +261,7 @@ async function getMintEventBlock(manager, tokenId, provider, ownerAddress) {
 
 // getBlockTimestamp: Defined at top-level for accessibility
 async function getBlockTimestamp(blockNumber) {
-  console.log(`DEBUG: Getting timestamp for block: ${blockNumber}`);
   const block = await provider.getBlock(blockNumber);
-  if (!block) {
-      throw new Error(`Block ${blockNumber} not found.`);
-  }
-  console.log(`DEBUG: Timestamp for block ${blockNumber}: ${new Date(block.timestamp * 1000).toISOString()}`);
   return block.timestamp * 1000; // JS Date expects ms
 }
 
@@ -276,7 +272,6 @@ let coingeckoHistoricalCooldownUntil = 0;
 async function fetchHistoricalPrice(coinId, dateStr) {
   const cacheKey = `${coinId}-${dateStr}`;
   if (historicalPriceCache[cacheKey]) {
-    console.log(`DEBUG: Using cached historical price for ${cacheKey}`);
     return historicalPriceCache[cacheKey];
   }
 
@@ -285,7 +280,6 @@ async function fetchHistoricalPrice(coinId, dateStr) {
       return 0; 
   }
 
-  console.log(`DEBUG: Fetching historical price for ${cacheKey} from CoinGecko.`);
   try {
     const url = `https://api.coingecko.com/api/v3/coins/${coinId}/history?date=${dateStr}`;
     const res = await fetch(url);
@@ -313,7 +307,6 @@ async function fetchHistoricalPrice(coinId, dateStr) {
 
     const price = data.market_data.current_price.usd || 0;
     historicalPriceCache[cacheKey] = price; 
-    console.log(`DEBUG: Fetched historical price for ${cacheKey}: ${price}`);
     return price;
   } catch (error) {
     console.error(`ERROR: Failed to get HISTORICAL USD price from CoinGecko for ${cacheKey}: ${error.message}`);
@@ -328,206 +321,58 @@ async function getFormattedPositionData(walletAddress) {
   let prices = { WETH: 0, USDC: 0 }; 
 
   try {
-    // Await provider.getNetwork() to ensure chainId is available
-    const network = await provider.getNetwork(); // Ensure network details are fetched
-    console.log(`DEBUG: Connected to network: ${network.name} (Chain ID: ${network.chainId})`);
-
-
     // Fetch CURRENT prices from CoinLore
-    console.log('DEBUG: Calling getUsdPrices (CoinLore)');
     prices = await getUsdPrices(); 
-    console.log('DEBUG: getUsdPrices (CoinLore) completed.');
 
     const manager = new ethers.Contract(managerAddress, managerAbi, provider);
-    const factory = new ethers.Contract(factoryAddress, factoryAbi, provider);
+    const pool = new ethers.Contract(poolAddress, poolAbi, provider);
 
-    console.log(`DEBUG: Getting balanceOf ${walletAddress}`);
-    const [balance] = await Promise.all([
-      manager.balanceOf(walletAddress)
+    const [balance, slot0, token0Addr, token1Addr] = await Promise.all([
+      manager.balanceOf(walletAddress),
+      pool.slot0(),
+      pool.token0(),
+      pool.token1()
     ]);
-    console.log(`DEBUG: Wallet has ${balance.toString()} positions.`);
+    const sqrtP = slot0[0];
+    const nativeTick = slot0[1];
+
+    const [poolT0, poolT1] = await Promise.all([
+      getTokenMeta(token0Addr),
+      getTokenMeta(token1Addr)
+    ]);
 
     responseMessage += `*👜 Wallet: ${walletAddress.substring(0, 6)}...${walletAddress.substring(38)}*\n\n`;
-    responseMessage += `✨ You own *${balance.toString()}* position(s) in Uniswap V3 pools\n`; 
+    responseMessage += `✨ You own *${balance.toString()}* position(s) in ${poolT0.symbol}/${poolT1.symbol} pool\n`;
 
     if (balance === 0n) {
-      console.log('DEBUG: No positions found. Returning.');
       return responseMessage;
     }
 
     let totalFeeUSD = 0;
-    let startPrincipalUSD = null; 
-    let startDate = null; 
-    let currentTotalPortfolioValue = 0; 
-    let totalPortfolioPrincipalUSD = 0; 
+    let startPrincipalUSD = null; // Overall portfolio initial investment
+    let startDate = null; // Overall portfolio oldest position start date
+    let currentTotalPortfolioValue = 0; // Accumulates total value of all positions including fees
+    let totalPortfolioPrincipalUSD = 0; // Accumulates principal value for ALL positions, excluding fees
 
     for (let i = 0n; i < balance; i++) {
       console.log(`DEBUG: Processing position #${i.toString()}`);
       responseMessage += `\n--- *Position #${i.toString()}* ---\n`;
       const tokenId = await manager.tokenOfOwnerByIndex(walletAddress, i);
-      console.log(`DEBUG: Token ID: ${tokenId.toString()}`);
       responseMessage += `🔹 Token ID: \`${tokenId.toString()}\`\n`;
-      
-      console.log(`DEBUG: Calling manager.positions(${tokenId})`);
-      const pos = await manager.positions(tokenId); 
-      console.log(`DEBUG: Position details fetched for tokenId ${tokenId}. pos.token0: ${pos.token0}, pos.token1: ${pos.token1}, pos.fee: ${pos.fee}`);
-
+      const pos = await manager.positions(tokenId);
       const [t0, t1] = await Promise.all([
         getTokenMeta(pos.token0),
         getTokenMeta(pos.token1)
       ]);
-      console.log(`DEBUG: Token metadata fetched for pool tokens.`);
-
-      // Dynamically get pool address via on-chain factory.getPool() call (as per working snippet)
-      console.log(`DEBUG: Getting pool address on-chain via factory.getPool() for ${t0.symbol}/${t1.symbol} fee: ${pos.fee}.`);
-      
-      let currentNFTPoolAddress;
-      const MAX_GETPOOL_RETRIES = 3; 
-      const GETPOOL_RETRY_DELAY = 1000; 
-
-      for (let attempt = 1; attempt <= MAX_GETPOOL_RETRIES; attempt++) {
-          try {
-              // Pass original pos.token0, pos.token1 as getPool handles unsorted order
-              console.log(`DEBUG: Attempt ${attempt} for factory.getPool(${t0.address}, ${t1.address}, ${pos.fee})`);
-              currentNFTPoolAddress = await factory.getPool(t0.address, t1.address, pos.fee); 
-              if (currentNFTPoolAddress === ethers.ZeroAddress) {
-                  throw new Error(`Factory returned zero address (pool might not exist) on attempt ${attempt}.`);
-              }
-              console.log(`DEBUG: Pool address found on attempt ${attempt}: ${currentNFTPoolAddress}`);
-              break; // Success, exit retry loop
-          } catch (e) {
-              console.error(`ERROR: Failed to get pool address from factory on attempt ${attempt}: ${e.message}`);
-              if (attempt < MAX_GETPOOL_RETRIES) {
-                  console.log(`DEBUG: Retrying getPool in ${GETPOOL_RETRY_DELAY}ms...`);
-                  await new Promise(resolve => setTimeout(resolve, GETPOOL_RETRY_DELAY));
-              } else {
-                  throw new Error(`Max retries exceeded for getPool: ${e.message}`); // Final failure
-              }
-          }
-      }
-      
-      if (!currentNFTPoolAddress || currentNFTPoolAddress === ethers.ZeroAddress) { 
-          responseMessage += `⚠️ Could not determine pool address after retries.\n`;
-          continue; // Skip this position if pool address cannot be found
-      }
-      
-      // Instantiate a new pool contract for this specific NFT's pool
-      const currentNFTPool = new ethers.Contract(currentNFTPoolAddress, poolAbi, provider);
-      
-      // Get slot0 data for this specific pool
-      console.log(`DEBUG: Getting slot0 data for pool ${currentNFTPoolAddress}`);
-      // MODIFIED: Added retry logic for currentNFTPool.slot0()
-      let slot0;
-      const MAX_SLOT0_RETRIES = 3;
-      const SLOT0_RETRY_DELAY = 1000;
-
-      for (let attempt = 1; attempt <= MAX_SLOT0_RETRIES; attempt++) {
-          try {
-              console.log(`DEBUG: Attempt ${attempt} for currentNFTPool.slot0() for pool ${currentNFTPoolAddress}`);
-              slot0 = await currentNFTPool.slot0();
-              console.log(`DEBUG: slot0 data fetched on attempt ${attempt}.`);
-              break; // Success, exit retry loop
-          } catch (e) {
-              console.error(`ERROR: Failed to get slot0 data on attempt ${attempt} for pool ${currentNFTPoolAddress}: ${e.message}`);
-              if (attempt < MAX_SLOT0_RETRIES) {
-                  console.log(`DEBUG: Retrying slot0 in ${SLOT0_RETRY_DELAY}ms...`);
-                  await new Promise(resolve => setTimeout(resolve, SLOT0_RETRY_DELAY));
-              } else {
-                  throw new Error(`Max retries exceeded for slot0: ${e.message}`); // Final failure
-              }
-          }
-      }
-
-      if (!slot0) { 
-          responseMessage += `⚠️ Could not get current price data for pool: ${escapeMarkdown(currentNFTPoolAddress)}\n`;
-          continue; // Skip this position if slot0 data cannot be found
-      }
-      
-      const sqrtP = slot0[0];
-      const nativeTick = slot0[1];
-      console.log(`DEBUG: slot0 data fetched. sqrtPriceX96: ${sqrtP}, tick: ${nativeTick}`);
-
-
-      responseMessage += `🔸 Pool: ${t0.symbol}/${t1.symbol} (${(Number(pos.fee) / 10000).toFixed(2)}%)`; // Add fee tier to pool display
-      responseMessage += `\n🔸 Pool Address: \`${currentNFTPoolAddress}\`\n`; // Display pool address for verification
-
+      responseMessage += `🔸 Pool: ${t0.symbol}/${t1.symbol}\n`;
 
       let currentPositionStartDate = null;
       let currentPositionInitialPrincipalUSD = 0; 
       let positionHistoryAnalysisSucceeded = false;
 
-      // Calculate principalUSD and totalPositionFeesUSD before attempting historical/fee analysis
-      const [sqrtL, sqrtU] = [
-        tickToSqrtPriceX96(Number(pos.tickLower)),
-        tickToSqrtPriceX96(Number(pos.tickUpper))
-      ];
-      const [raw0, raw1] = getAmountsFromLiquidity(pos.liquidity, sqrtP, sqrtL, sqrtU);
-      const amt0 = parseFloat(formatUnits(raw0, t0.decimals));
-      const amt1 = parseFloat(formatUnits(raw1, t1.decimals));
-
-      let amtWETH = 0, amtUSDC = 0;
-      if (t0.symbol.toUpperCase() === "WETH") {
-        amtWETH = amt0;
-        amtUSDC = amt1;
-      } else {
-        amtWETH = amt1;
-        amtUSDC = amt0;
-      }
-
-      const principalUSD = amtWETH * prices.WETH + amtUSDC * prices.USDC;
-      
-      // MODIFIED: Added retry logic for manager.collect.staticCall()
-      let xp;
-      const MAX_COLLECT_RETRIES = 3;
-      const COLLECT_RETRY_DELAY = 1000;
-
-      for (let attempt = 1; attempt <= MAX_COLLECT_RETRIES; attempt++) {
-          try {
-              console.log(`DEBUG: Attempt ${attempt} for manager.collect.staticCall()`);
-              xp = await manager.collect.staticCall({
-                tokenId,
-                recipient: walletAddress,
-                amount0Max: UINT128_MAX,
-                amount1Max: UINT128_MAX
-              });
-              console.log(`DEBUG: manager.collect.staticCall() fetched on attempt ${attempt}.`);
-              break; // Success, exit retry loop
-          } catch (e) {
-              console.error(`ERROR: Failed to get uncollected fees on attempt ${attempt}: ${e.message}`);
-              if (attempt < MAX_COLLECT_RETRIES) {
-                  console.log(`DEBUG: Retrying collect.staticCall() in ${COLLECT_RETRY_DELAY}ms...`);
-                  await new Promise(resolve => setTimeout(resolve, COLLECT_RETRY_DELAY));
-              } else {
-                  throw new Error(`Max retries exceeded for collect.staticCall(): ${e.message}`); // Final failure
-              }
-          }
-      }
-
-      if (!xp) { // Safety check after retry loop
-          responseMessage += `⚠️ Could not get uncollected fees.\n`;
-          xp = [0n, 0n]; // Default to 0 to avoid further errors
-      }
-
-      const fee0 = parseFloat(formatUnits(xp[0], t0.decimals));
-      const fee1 = parseFloat(formatUnits(xp[1], t1.decimals));
-      const feeUSD0 = fee0 * (t0.symbol.toUpperCase() === "WETH" ? prices.WETH : prices.USDC);
-      const feeUSD1 = fee1 * (t1.symbol.toUpperCase() === "WETH" ? prices.WETH : prices.USDC);
-      const totalPositionFeesUSD = feeUSD0 + feeUSD1;
-
-
-      // NEW OPTIMIZATION: Skip further processing if holdings and fees are zero
-      if (principalUSD === 0 && totalPositionFeesUSD === 0) {
-          responseMessage += `\nℹ️ Holdings and fees are zero. Skipping detailed historical and performance analysis.\n`;
-          console.log(`DEBUG: Position ${tokenId} has zero holdings and fees. Skipping further analysis.`);
-          continue; // Skip to next position
-      }
-
-
       // Get mint event and analyze initial investment (uses CoinGecko for historical)
       try {
-        console.log(`DEBUG: Attempting to get mint block for tokenId ${tokenId}.`);
         const mintBlock = await getMintEventBlock(manager, tokenId, provider, walletAddress);
-        console.log(`DEBUG: Mint block for tokenId ${tokenId}: ${mintBlock}`);
         const startTimestampMs = await getBlockTimestamp(mintBlock);
         currentPositionStartDate = new Date(startTimestampMs);
         
@@ -542,11 +387,8 @@ async function getFormattedPositionData(walletAddress) {
         const yearCurrent = currentPositionStartDate.getFullYear();
         const dateStrCurrent = `${dayCurrent}-${monthCurrent}-${yearCurrent}`;
         
-        console.log(`DEBUG: Fetching historical WETH for ${dateStrCurrent}`);
         const histWETHCurrent = await fetchHistoricalPrice('ethereum', dateStrCurrent);
-        console.log(`DEBUG: Fetching historical USDC for ${dateStrCurrent}`);
         const histUSDCCurrent = await fetchHistoricalPrice('usd-coin', dateStrCurrent);
-        console.log(`DEBUG: Historical prices fetched. WETH: ${histWETHCurrent}, USDC: ${histUSDCCurrent}`);
 
         const [histAmt0Current, histAmt1Current] = getAmountsFromLiquidity(
             pos.liquidity,
@@ -581,10 +423,11 @@ async function getFormattedPositionData(walletAddress) {
         responseMessage += `💰 Initial Investment: $${currentPositionInitialPrincipalUSD.toFixed(2)}\n`; 
       } catch (error) {
         responseMessage += `⚠️ Could not analyze position history: ${escapeMarkdown(error.message)}\n`; // Escaped error message
-        console.error(`ERROR: Error in historical analysis for position ${tokenId}: ${error.message}`);
       }
 
-      // Current position analysis (moved here so principalUSD is already calculated)
+      // Current position analysis
+      const lowerPrice = tickToPricePerToken0(Number(pos.tickLower), Number(t0.decimals), Number(t1.decimals));
+      const upperPrice = tickToPricePerToken0(Number(pos.tickUpper), Number(t0.decimals), Number(t1.decimals));
       const currentPrice = tickToPricePerToken0(Number(nativeTick), Number(t0.decimals), Number(t1.decimals));
 
       responseMessage += `\n*Price Information*\n`; // Removed icon
@@ -594,19 +437,124 @@ async function getFormattedPositionData(walletAddress) {
       const inRange = nativeTick >= pos.tickLower && nativeTick < pos.tickUpper;
       responseMessage += `📍 In Range? ${inRange ? "✅ Yes" : "❌ No"}\n`;
 
-      // Holdings and Fees displays (principalUSD and totalPositionFeesUSD are already calculated)
-      responseMessage += `\n*Current Holdings*\n`; // Removed icon
+      // Calculate current amounts
+      const [sqrtL, sqrtU] = [
+        tickToSqrtPriceX96(Number(pos.tickLower)),
+        tickToSqrtPriceX96(Number(pos.tickUpper))
+      ];
+      const [raw0, raw1] = getAmountsFromLiquidity(pos.liquidity, sqrtP, sqrtL, sqrtU);
+      const amt0 = parseFloat(formatUnits(raw0, t0.decimals));
+      const amt1 = parseFloat(formatUnits(raw1, t1.decimals));
+
+      let amtWETH = 0, amtUSDC = 0;
+      if (t0.symbol.toUpperCase() === "WETH") {
+        amtWETH = amt0;
+        amtUSDC = amt1;
+      } else {
+        amtWETH = amt1;
+        amtUSDC = amt0;
+      }
+
+      const principalUSD = amtWETH * prices.WETH + amtUSDC * prices.USDC;
+      
+      const xp = await manager.collect.staticCall({
+        tokenId,
+        recipient: walletAddress,
+        amount0Max: UINT128_MAX,
+        amount1Max: UINT128_MAX
+      });
+
+      const fee0 = parseFloat(formatUnits(xp[0], t0.decimals));
+      const fee1 = parseFloat(formatUnits(xp[1], t1.decimals));
+      const feeUSD0 = fee0 * (t0.symbol.toUpperCase() === "WETH" ? prices.WETH : prices.USDC);
+      const feeUSD1 = fee1 * (t1.symbol.toUpperCase() === "WETH" ? prices.WETH : prices.USDC);
+      const totalPositionFeesUSD = feeUSD0 + feeUSD1;
+
+
+      // NEW OPTIMIZATION: Skip further processing if holdings and fees are zero
+      if (principalUSD === 0 && totalPositionFeesUSD === 0) {
+          responseMessage += `\nℹ️ Holdings and fees are zero. Skipping detailed historical and performance analysis.\n`;
+          continue; // Skip to next position
+      }
+
+
+      // Get mint event and analyze initial investment (uses CoinGecko for historical)
+      try {
+        const mintBlock = await getMintEventBlock(manager, tokenId, provider, walletAddress);
+        const startTimestampMs = await getBlockTimestamp(mintBlock);
+        currentPositionStartDate = new Date(startTimestampMs);
+        
+        // Update overall startDate if this position is older
+        if (!startDate || currentPositionStartDate.getTime() < startDate.getTime()) {
+            startDate = currentPositionStartDate;
+        }
+
+        // --- Calculate initial principal for THIS specific position ---
+        const dayCurrent = currentPositionStartDate.getDate().toString().padStart(2, '0');
+        const monthCurrent = (currentPositionStartDate.getMonth() + 1).toString().padStart(2, '0');
+        const yearCurrent = currentPositionStartDate.getFullYear();
+        const dateStrCurrent = `${dayCurrent}-${monthCurrent}-${yearCurrent}`;
+        
+        const histWETHCurrent = await fetchHistoricalPrice('ethereum', dateStrCurrent);
+        const histUSDCCurrent = await fetchHistoricalPrice('usd-coin', dateStrCurrent);
+
+        const [histAmt0Current, histAmt1Current] = getAmountsFromLiquidity(
+            pos.liquidity,
+            tickToSqrtPriceX96(Number(pos.tickLower)),
+            tickToSqrtPriceX96(Number(pos.tickUpper)), 
+            tickToSqrtPriceX96(Number(pos.tickUpper)) 
+        );
+        let histWETHamtCurrent = 0, histUSDCamtCurrent = 0;
+        if (t0.symbol.toUpperCase() === "WETH") {
+            histWETHamtCurrent = parseFloat(formatUnits(histAmt0Current, t0.decimals));
+            histUSDCamtCurrent = parseFloat(formatUnits(histAmt1Current, t1.decimals));
+        } else {
+            histWETHamtCurrent = parseFloat(formatUnits(histAmt1Current, t1.decimals));
+            histUSDCamtCurrent = parseFloat(formatUnits(histAmt0Current, t0.decimals));
+        }
+        currentPositionInitialPrincipalUSD = histWETHamtCurrent * histWETHCurrent + histUSDCamtCurrent * histUSDCCurrent;
+        
+        // Only mark success if actual prices were retrieved (not 0 due to API error)
+        if (currentPositionInitialPrincipalUSD > 0) {
+             positionHistoryAnalysisSucceeded = true;
+        }
+
+        // --- Update overall portfolio's initial investment based on oldest position ---
+        // This is where we ensure the overall 'startPrincipalUSD' (which is oldest) gets correctly set
+        // if this current position is the oldest one found so far, and its historical data was successful.
+        if (positionHistoryAnalysisSucceeded && (startPrincipalUSD === null || currentPositionStartDate.getTime() === startDate.getTime())) {
+            startPrincipalUSD = currentPositionInitialPrincipalUSD;
+        }
+
+
+        responseMessage += `📅 Created: ${currentPositionStartDate.toISOString().replace('T', ' ').slice(0, 19)}\n`;
+        responseMessage += `💰 Initial Investment: $${currentPositionInitialPrincipalUSD.toFixed(2)}\n`; 
+      } catch (error) {
+        responseMessage += `⚠️ Could not analyze position history: ${escapeMarkdown(error.message)}\n`; 
+      }
+
+      // Current position analysis
+      const currentPrice = tickToPricePerToken0(Number(nativeTick), Number(t0.decimals), Number(t1.decimals));
+
+      responseMessage += `\n*Price Information*\n`; 
+      responseMessage += `🏷️ Range: $${lowerPrice.toFixed(2)} - $${upperPrice.toFixed(2)} ${t1.symbol}/${t0.symbol}\n`; 
+      responseMessage += `🏷️ Current Price: $${currentPrice.toFixed(2)} ${t1.symbol}/${t0.symbol}\n`; 
+      
+      const inRange = nativeTick >= pos.tickLower && nativeTick < pos.tickUpper;
+      responseMessage += `📍 In Range? ${inRange ? "✅ Yes" : "❌ No"}\n`;
+
+      // Holdings and Fees displays
+      responseMessage += `\n*Current Holdings*\n`; 
       responseMessage += `🏛 ${formatTokenAmount(amtWETH, 6)} WETH ($${(amtWETH * prices.WETH).toFixed(2)})\n`;
       responseMessage += `🏛 ${formatTokenAmount(amtUSDC, 2)} USDC ($${(amtUSDC * prices.USDC).toFixed(2)})\n`;
       responseMessage += `🏛 Ratio: WETH/USDC ${ratio.weth}/${ratio.usdc}%\n`;
-      responseMessage += `🏛 Holdings: *$${principalUSD.toFixed(2)}*\n`; // Changed to Holdings
-      // NEW: Holdings change for this position
+      responseMessage += `🏛 Holdings: *$${principalUSD.toFixed(2)}*\n`; 
       const positionHoldingsChange = principalUSD - currentPositionInitialPrincipalUSD;
       if (positionHistoryAnalysisSucceeded && currentPositionInitialPrincipalUSD > 0) {
           responseMessage += `📈 Holdings change: $${positionHoldingsChange.toFixed(2)}\n`; 
       }
 
-      responseMessage += `\n*Uncollected Fees*\n`; // Removed icon
+      responseMessage += `\n*Uncollected Fees*\n`; 
       responseMessage += `💰 ${formatTokenAmount(fee0, 6)} ${t0.symbol} ($${feeUSD0.toFixed(2)})\n`;
       responseMessage += `💰 ${formatTokenAmount(fee1, 2)} ${t1.symbol} ($${feeUSD1.toFixed(2)})\n`;
       responseMessage += `💰 Total Fees: *$${totalPositionFeesUSD.toFixed(2)}*\n`; 
@@ -634,8 +582,7 @@ async function getFormattedPositionData(walletAddress) {
       const currentTotalValue = principalUSD + totalPositionFeesUSD;
       responseMessage += `\n🏦 Position Value: *$${currentTotalValue.toFixed(2)}*\n`; 
 
-      const positionReturn = principalUSD - currentPositionInitialPrincipalUSD; 
-      const positionTotalGains = positionReturn + totalPositionFeesUSD; 
+      const positionTotalGains = (principalUSD - currentPositionInitialPrincipalUSD) + totalPositionFeesUSD; 
       if (positionHistoryAnalysisSucceeded && currentPositionInitialPrincipalUSD > 0) {
           responseMessage += `📈 Position Total return + Fees: $${positionTotalGains.toFixed(2)}\n`;
       }
