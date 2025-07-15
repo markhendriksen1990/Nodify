@@ -24,7 +24,7 @@ const managerAddress = "0x03a520b32c04bf3beef7beb72e919cf822ed34f1";
 const myAddress = "0x2FD24cC510b7a40b176B05A5Bb628d024e3B6886";
 
 // Uniswap V3 Factory Address (No longer needed to call getPool directly, but keep Factory ABI for completeness if any other Factory methods are used)
-const factoryAddress = "0x33128a8fc17869b8dceb626f79ceefbeed336b3b"; 
+const factoryAddress = "0x33128a8fC17869897dcE68Ed026d694621f6FDfD"; 
 
 // --- ABIs ---
 const managerAbi = [
