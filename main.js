@@ -222,8 +222,8 @@ async function getMintEventBlock(manager, tokenId, provider, ownerAddress) {
   console.log(`DEBUG: Starting getMintEventBlock for tokenId: ${tokenId}.`);
   const latestBlock = await provider.getBlockNumber();
   const zeroAddress = "0x0000000000000000000000000000000000000000";
-  // MODIFIED: RPC_QUERY_WINDOW set back to 49999 as requested
-  const RPC_QUERY_WINDOW = 49999;       
+  // MODIFIED: RPC_QUERY_WINDOW reduced to 2000 for eth_getLogs reliability
+  const RPC_QUERY_WINDOW = 2000;       
 
   let fromBlock = latestBlock - RPC_QUERY_WINDOW;
   let toBlock = latestBlock;
@@ -677,7 +677,7 @@ async function getFormattedPositionData(walletAddress) {
 
         // Corrected All time gains: Principal return + Total Fees Earned
         const allTimeGains = totalReturn + totalFeeUSD; 
-        responseMessage += `\n📈 Total return + Fees: $${allTimeGains.toFixed(2)}\n`; // Changed text
+        responseMessage += `\n📈 Total return + Fees: $${allTimeGains.toFixed(2)}\n`; // Changed text and icon
 
         // Removed: Overall Performance heading and Total APR (incl. price changes) line
         // If you need the overall APR for the total value (principal + fees) again, re-add this explicitly.
@@ -692,7 +692,6 @@ async function getFormattedPositionData(walletAddress) {
     console.error("Error in getFormattedPositionData:", error);
     responseMessage = `An error occurred while fetching liquidity positions: ${escapeMarkdown(error.message)}. Please try again later.`; 
   }
-  return responseMessage;
 }
 
 // --- Express App Setup for Webhook ---
