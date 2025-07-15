@@ -3,7 +3,6 @@ const { ethers } = require("ethers");
 const express = require('express');
 const bodyParser = require('body-parser');
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
-// ++ NEW: Import Uniswap V3 Factory ABI ++
 const { abi: FactoryAbi } = require('@uniswap/v3-core/artifacts/contracts/UniswapV3Factory.sol/UniswapV3Factory.json');
 
 
@@ -17,10 +16,7 @@ const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 const provider = new ethers.JsonRpcProvider("https://base.publicnode.com");
 
 const managerAddress = "0x03a520b32c04bf3beef7beb72e919cf822ed34f1";
-// -- REMOVED: Hardcoded poolAddress has been removed --
-// const poolAddress = "0xd0b53D9277642d899DF5C87A3966A349A798F224";
 const myAddress = "0x2FD24cC510b7a40b176B05A5Bb628d024e3B6886";
-// ++ NEW: Uniswap V3 Factory Address for Base Mainnet ++
 const factoryAddress = '0x33128a8fC17869897dcE68Ed026d694621f6FDfD';
 
 
@@ -47,13 +43,9 @@ const erc20Abi = [
 const UINT128_MAX = "340282366920938463463374607431768211455";
 const { formatUnits } = ethers;
 
-// --- Utility Functions (No changes here) ---
+// --- Utility Functions ---
 
-// Helper to escape markdown characters for Telegram messages
-function escapeMarkdown(text) {
-    if (typeof text !== 'string') return '';
-    return text.replace(/[_*[\]()~`>#+-=|{}.!]/g, '\\$&');
-}
+// -- REMOVED: escapeMarkdown function is no longer needed with legacy 'Markdown' parse mode.
 
 function tickToSqrtPriceX96(tick) {
     const ratio = Math.pow(1.0001, Number(tick));
@@ -249,13 +241,12 @@ async function getFormattedPositionData(walletAddress) {
         prices = await getUsdPrices();
 
         const manager = new ethers.Contract(managerAddress, managerAbi, provider);
-        // ++ NEW: Instantiate the factory contract once ++
         const factory = new ethers.Contract(factoryAddress, FactoryAbi, provider);
 
         const balance = await manager.balanceOf(walletAddress);
 
         responseMessage += `*👜 Wallet: ${walletAddress.substring(0, 6)}...${walletAddress.substring(38)}*\n\n`;
-        responseMessage += `✨ You own *${balance.toString()}* Uniswap V3 position(s)\\.\n`; // Added a note about V3 and escaped the period.
+        responseMessage += `✨ You own *${balance.toString()}* Uniswap V3 position(s).\n`;
 
         if (balance === 0n) {
             return responseMessage;
@@ -271,20 +262,17 @@ async function getFormattedPositionData(walletAddress) {
             const tokenId = await manager.tokenOfOwnerByIndex(walletAddress, i);
             const pos = await manager.positions(tokenId);
 
-            // ++ NEW: Dynamically get the pool address for each position ++
             const dynamicPoolAddress = await factory.getPool(pos.token0, pos.token1, pos.fee);
 
             if (dynamicPoolAddress === ethers.ZeroAddress) {
                 responseMessage += `\n--- *Position #${i.toString()}* ---\n`;
                 responseMessage += `🔹 Token ID: \`${tokenId.toString()}\`\n`;
-                responseMessage += `⚠️ Could not find a valid pool for this position\\. Skipping\\.\n`;
-                continue; // Skip to the next position
+                responseMessage += `⚠️ Could not find a valid pool for this position. Skipping.\n`;
+                continue;
             }
             
-            // ++ NEW: Instantiate the pool contract inside the loop with the dynamic address ++
             const pool = new ethers.Contract(dynamicPoolAddress, poolAbi, provider);
 
-            // ++ NEW: Fetch pool-specific data inside the loop ++
             const [slot0, token0Addr, token1Addr] = await Promise.all([
                 pool.slot0(),
                 pool.token0(),
@@ -298,13 +286,10 @@ async function getFormattedPositionData(walletAddress) {
                 getTokenMeta(token0Addr),
                 getTokenMeta(token1Addr)
             ]);
-
-            // The rest of your logic remains largely the same, as it was already using `pos` and `t0`/`t1`
-            // which are correctly defined for each position.
             
             responseMessage += `\n--- *Position #${i.toString()}* ---\n`;
             responseMessage += `🔹 Token ID: \`${tokenId.toString()}\`\n`;
-            responseMessage += `🔸 Pool: ${t0.symbol}/${t1.symbol} (${Number(pos.fee)/10000}% fee)\n`; // Added fee tier info
+            responseMessage += `🔸 Pool: ${t0.symbol}/${t1.symbol} (${Number(pos.fee)/10000}% fee)\n`;
 
             let currentPositionStartDate = null;
             let currentPositionInitialPrincipalUSD = 0;
@@ -355,7 +340,7 @@ async function getFormattedPositionData(walletAddress) {
                 responseMessage += `📅 Created: ${currentPositionStartDate.toISOString().replace('T', ' ').slice(0, 19)}\n`;
                 responseMessage += `💰 Initial Investment: $${currentPositionInitialPrincipalUSD.toFixed(2)}\n`;
             } catch (error) {
-                responseMessage += `⚠️ Could not analyze position history: ${escapeMarkdown(error.message)}\n`;
+                responseMessage += `⚠️ Could not analyze position history: ${error.message}\n`;
             }
 
             const lowerPrice = tickToPricePerToken0(Number(pos.tickLower), Number(t0.decimals), Number(t1.decimals));
@@ -437,7 +422,7 @@ async function getFormattedPositionData(walletAddress) {
                 responseMessage += `💰 Fees per year: $${rewardsPerYear.toFixed(2)}\n`;
                 responseMessage += `💰 Fees APR: ${feesAPR.toFixed(2)}%\n`;
             } else {
-                responseMessage += `\n⚠️ Could not determine per-position fee performance (initial investment unknown or zero)\\.\n`;
+                responseMessage += `\n⚠️ Could not determine per-position fee performance (initial investment unknown or zero).\n`;
             }
 
             const currentTotalValue = principalUSD + totalPositionFeesUSD;
@@ -478,18 +463,19 @@ async function getFormattedPositionData(walletAddress) {
             const allTimeGains = totalReturn + totalFeeUSD;
             responseMessage += `\n📈 Total return + Fees: $${allTimeGains.toFixed(2)}\n`;
         } else {
-            responseMessage += `\n❌ Coingecko API might be on cooldown\\. Could not determine start date or initial investment\\.\n`;
+            responseMessage += `\n❌ Coingecko API might be on cooldown. Could not determine start date or initial investment.\n`;
         }
 
     } catch (error) {
         console.error("Error in getFormattedPositionData:", error);
-        responseMessage = `An error occurred while fetching liquidity positions: ${escapeMarkdown(error.message)}. Please try again later.`;
+        // Removed the escapeMarkdown call as it's no longer needed
+        responseMessage = `An error occurred while fetching liquidity positions: ${error.message}. Please try again later.`;
     }
     return responseMessage;
 }
 
 
-// --- Express App Setup for Webhook (No changes here) ---
+// --- Express App Setup for Webhook ---
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -538,7 +524,8 @@ async function sendMessage(chatId, text) {
             body: JSON.stringify({
                 chat_id: chatId,
                 text: text,
-                parse_mode: 'MarkdownV2', // Changed to MarkdownV2 for better escaping
+                // ++ FIX: Reverted to legacy 'Markdown' mode to avoid strict character escaping rules ++
+                parse_mode: 'Markdown',
                 disable_web_page_preview: true
             })
         });
@@ -550,14 +537,6 @@ async function sendMessage(chatId, text) {
         console.error('Error sending message to Telegram:', error);
     }
 }
-// Escape function specifically for MarkdownV2
-function escapeMarkdown(text) {
-    if (typeof text !== 'string') return '';
-    // This is the correct set of characters to escape for MarkdownV2
-    const charsToEscape = '_*[]()~`>#+-=|{}.!';
-    return text.replace(new RegExp(`[${charsToEscape.replace(/./g, '\\$&')}]`, 'g'), '\\$&');
-}
-
 
 async function sendChatAction(chatId, action) {
     const telegramApiUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendChatAction`;
