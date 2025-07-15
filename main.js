@@ -147,55 +147,72 @@ function formatElapsedDaysHours(ms) {
     return `${days} days, ${hours} `;
 }
 
-let consecutiveRpcErrors = 0;
-const MAX_CONSECUTIVE_RPC_ERRORS = 2;
-
+// ++ UPDATE: getMintEventBlock now includes a retry mechanism ++
 async function getMintEventBlock(manager, tokenId, provider, ownerAddress) {
     const latestBlock = await provider.getBlockNumber();
     const zeroAddress = "0x0000000000000000000000000000000000000000";
-    const RPC_QUERY_WINDOW = 49999;
-    let fromBlock = latestBlock - RPC_QUERY_WINDOW;
+    const INITIAL_RPC_QUERY_WINDOW = 49999;
+    const maxRetries = 5;
+
     let toBlock = latestBlock;
     ownerAddress = ownerAddress.toLowerCase();
+
     while (toBlock >= 0) {
-        if (consecutiveRpcErrors >= MAX_CONSECUTIVE_RPC_ERRORS) {
-            console.error(`Exceeded ${MAX_CONSECUTIVE_RPC_ERRORS} consecutive RPC errors. Aborting getMintEventBlock for tokenId ${tokenId}.`);
-            throw new Error(`Too many consecutive RPC errors. Could not find mint event.`);
+        let fromBlock = toBlock - INITIAL_RPC_QUERY_WINDOW;
+        if (fromBlock < 0) {
+            fromBlock = 0;
         }
-        if (fromBlock < 0) fromBlock = 0;
+
         const filter = manager.filters.Transfer(zeroAddress, null, tokenId);
-        try {
-            const events = await manager.queryFilter(filter, fromBlock, toBlock);
-            const mint = events.find(e => e.args && e.args.to.toLowerCase() === ownerAddress);
-            if (mint) {
-                consecutiveRpcErrors = 0;
-                return mint.blockNumber;
+        
+        let success = false;
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                const events = await manager.queryFilter(filter, fromBlock, toBlock);
+                const mint = events.find(e => e.args && e.args.to.toLowerCase() === ownerAddress);
+                if (mint) {
+                    return mint.blockNumber; // Found it, exit the function
+                }
+                success = true; // Query succeeded, even if mint not in this range
+                break; // Exit retry loop
+            } catch (e) {
+                const errorMessage = e.message || "";
+                if (errorMessage.includes("invalid block range") || errorMessage.includes("block range is too wide")) {
+                    const newWindow = Math.floor((toBlock - fromBlock) / 2);
+                    fromBlock = toBlock - newWindow;
+                    console.warn(`Attempt ${attempt} failed for tokenId ${tokenId}: Block range too large. Retrying with smaller window: ${newWindow} blocks.`);
+                    await new Promise(res => setTimeout(res, 1000 * attempt)); // Wait longer on each retry
+                } else {
+                     // Non-retriable error
+                    console.error(`Unrecoverable error querying logs for tokenId ${tokenId}:`, e);
+                    throw e; // Or break to continue scanning
+                }
             }
-            consecutiveRpcErrors = 0;
-        } catch (e) {
-            consecutiveRpcErrors++;
-            console.warn(`Error querying block range ${fromBlock}-${toBlock}: ${e.message}. Consecutive errors: ${consecutiveRpcErrors}. Attempting next window.`);
         }
+
+        if (!success) {
+            console.error(`All ${maxRetries} retry attempts failed for block range ${fromBlock}-${toBlock} on tokenId ${tokenId}. Skipping this range.`);
+        }
+
         toBlock = fromBlock - 1;
-        fromBlock = toBlock - RPC_QUERY_WINDOW;
     }
-    throw new Error("Mint event not found for tokenId");
+
+    throw new Error(`Mint event not found for tokenId ${tokenId} after scanning all blocks.`);
 }
+
 
 async function getBlockTimestamp(blockNumber) {
     const block = await provider.getBlock(blockNumber);
     return block.timestamp * 1000;
 }
 
-// ++ CACHE: This object holds fetched prices to avoid re-fetching for the same date.
 const historicalPriceCache = {};
 let coingeckoHistoricalCooldownUntil = 0;
 
 async function fetchHistoricalPrice(coinId, dateStr) {
     const cacheKey = `${coinId}-${dateStr}`;
-    // ++ CACHE: Check if the price is already in our cache.
     if (historicalPriceCache[cacheKey]) {
-        return historicalPriceCache[cacheKey]; // Return the cached price.
+        return historicalPriceCache[cacheKey];
     }
     if (Date.now() < coingeckoHistoricalCooldownUntil) {
         console.warn(`CoinGecko Historical API still on cooldown. Skipping request for ${cacheKey}.`);
@@ -223,7 +240,6 @@ async function fetchHistoricalPrice(coinId, dateStr) {
             throw new Error(`CoinGecko Historical API returned incomplete data for ${coinId} on ${dateStr}.`);
         }
         const price = data.market_data.current_price.usd || 0;
-        // ++ CACHE: Save the newly fetched price into the cache.
         historicalPriceCache[cacheKey] = price;
         return price;
     } catch (error) {
@@ -340,7 +356,19 @@ async function getFormattedPositionData(walletAddress) {
                     histWETHamtCurrent = parseFloat(formatUnits(histAmt1Current, t1.decimals));
                     histUSDCamtCurrent = parseFloat(formatUnits(histAmt0Current, t0.decimals));
                 }
+                
+                // Add console logs for debugging the initial investment calculation
+                console.log(`--- Debugging Initial Investment for Token ID: ${tokenId.toString()} ---`);
+                console.log(`Mint Date: ${dateStrCurrent}`);
+                console.log(`Historical WETH Price: $${histWETHCurrent}`);
+                console.log(`Historical USDC Price: $${histUSDCCurrent}`);
+                console.log(`Calculated Historical WETH Amount: ${histWETHamtCurrent}`);
+                console.log(`Calculated Historical USDC Amount: ${histUSDCamtCurrent}`);
+
                 currentPositionInitialPrincipalUSD = histWETHamtCurrent * histWETHCurrent + histUSDCamtCurrent * histUSDCCurrent;
+                console.log(`Total Initial Investment Calculated: $${currentPositionInitialPrincipalUSD}`);
+                console.log('----------------------------------------------------');
+
 
                 if (currentPositionInitialPrincipalUSD > 0) {
                     positionHistoryAnalysisSucceeded = true;
