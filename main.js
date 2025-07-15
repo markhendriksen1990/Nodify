@@ -202,7 +202,7 @@ async function fetchHistoricalPrice(coinId, dateStr) {
         return 0;
     }
     try {
-        const url = `https://api.coingecko.com/api/v3/coins/${coinId}/history?date=${dateStr}`;
+        const url = `https://api.coingecko.com/api/v3/coins/${coinId}/history?date=${dateStr}&x_cg_demo_api_key=CG-UVFFYYLSfEA26y4Dd31pYcLL`;
         const res = await fetch(url);
         if (!res.ok) {
             console.error(`CoinGecko Historical API responded with status: ${res.status} ${res.statusText}`);
