@@ -223,7 +223,7 @@ async function getMintEventBlock(manager, tokenId, provider, ownerAddress) {
   const latestBlock = await provider.getBlockNumber();
   const zeroAddress = "0x0000000000000000000000000000000000000000";
   // MODIFIED: RPC_QUERY_WINDOW reduced to 2000 for eth_getLogs reliability
-  const RPC_QUERY_WINDOW = 2000;       
+  const RPC_QUERY_WINDOW = 99998;       
 
   let fromBlock = latestBlock - RPC_QUERY_WINDOW;
   let toBlock = latestBlock;
