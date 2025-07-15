@@ -476,12 +476,37 @@ async function getFormattedPositionData(walletAddress) {
 
       const principalUSD = amtWETH * prices.WETH + amtUSDC * prices.USDC;
       
-      const xp = await manager.collect.staticCall({
-        tokenId,
-        recipient: walletAddress,
-        amount0Max: UINT128_MAX,
-        amount1Max: UINT128_MAX
-      });
+      // MODIFIED: Added retry logic for manager.collect.staticCall()
+      let xp;
+      const MAX_COLLECT_RETRIES = 3;
+      const COLLECT_RETRY_DELAY = 1000;
+
+      for (let attempt = 1; attempt <= MAX_COLLECT_RETRIES; attempt++) {
+          try {
+              console.log(`DEBUG: Attempt ${attempt} for manager.collect.staticCall()`);
+              xp = await manager.collect.staticCall({
+                tokenId,
+                recipient: walletAddress,
+                amount0Max: UINT128_MAX,
+                amount1Max: UINT128_MAX
+              });
+              console.log(`DEBUG: manager.collect.staticCall() fetched on attempt ${attempt}.`);
+              break; // Success, exit retry loop
+          } catch (e) {
+              console.error(`ERROR: Failed to get uncollected fees on attempt ${attempt}: ${e.message}`);
+              if (attempt < MAX_COLLECT_RETRIES) {
+                  console.log(`DEBUG: Retrying collect.staticCall() in ${COLLECT_RETRY_DELAY}ms...`);
+                  await new Promise(resolve => setTimeout(resolve, COLLECT_RETRY_DELAY));
+              } else {
+                  throw new Error(`Max retries exceeded for collect.staticCall(): ${e.message}`); // Final failure
+              }
+          }
+      }
+
+      if (!xp) { // Safety check after retry loop
+          responseMessage += `⚠️ Could not get uncollected fees.\n`;
+          xp = [0n, 0n]; // Default to 0 to avoid further errors
+      }
 
       const fee0 = parseFloat(formatUnits(xp[0], t0.decimals));
       const fee1 = parseFloat(formatUnits(xp[1], t1.decimals));
