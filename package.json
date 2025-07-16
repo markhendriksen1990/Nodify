@@ -13,7 +13,9 @@
     "node-fetch": "^3.x.x",
     "@uniswap/v3-sdk": "latest",
     "@uniswap/sdk-core": "latest",
-    "jsbi": "latest"
+    "jsbi": "latest",
+    "canvas": "^x.x.x",
+    "form-data": "^x.x.x"  
   },
   "keywords": [],
   "author": "",
