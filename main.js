@@ -269,15 +269,12 @@ async function fetchHistoricalPrice(coinId, dateStr) {
 
 // --- Main Data Fetching and Formatting Logic ---
 async function getPositionsData(walletAddress) {
-    console.log("[DEBUG] Starting to fetch positions data...");
-    
     const prices = await getUsdPrices();
     const manager = new ethers.Contract(managerAddress, managerAbi, provider);
     const factory = new ethers.Contract(factoryAddress, FactoryAbi, provider);
     const balance = await manager.balanceOf(walletAddress);
 
     if (balance === 0n) {
-        console.log("[DEBUG] No positions found.");
         return [];
     }
     
@@ -289,7 +286,6 @@ async function getPositionsData(walletAddress) {
         const dynamicPoolAddress = await factory.getPool(pos.token0, pos.token1, pos.fee);
 
         if (dynamicPoolAddress === ethers.ZeroAddress) {
-            console.warn(`[DEBUG] Skipping tokenId ${tokenId.toString()} as no valid pool was found.`);
             continue;
         }
         
@@ -320,41 +316,30 @@ async function getPositionsData(walletAddress) {
         const positionDataObject = { i, tokenId, t0, t1, pos, nativeTick, amt0, amt1, fee0, fee1, prices, sqrtL, sqrtU };
 
         try {
-            // ++ NEW: Added more detailed debugging lines here ++
-            console.log(`\n[INVESTMENT-DEBUG] --- Starting Historical Analysis for Token ID: ${tokenId.toString()} ---`);
             const mintBlock = await getMintEventBlock(manager, tokenId, provider, walletAddress);
-            console.log(`[INVESTMENT-DEBUG] 1. Mint Block: ${mintBlock}`);
-            
             const startTimestampMs = await getBlockTimestamp(mintBlock);
             positionDataObject.currentPositionStartDate = new Date(startTimestampMs);
-            console.log(`[INVESTMENT-DEBUG] 2. Mint Timestamp: ${positionDataObject.currentPositionStartDate.toISOString()}`);
-            
+
+            if (!positionDataObject.startDate || positionDataObject.currentPositionStartDate.getTime() < positionDataObject.startDate.getTime()) {
+                positionDataObject.startDate = positionDataObject.currentPositionStartDate;
+            }
+
             const dayCurrent = positionDataObject.currentPositionStartDate.getDate().toString().padStart(2, '0');
             const monthCurrent = (positionDataObject.currentPositionStartDate.getMonth() + 1).toString().padStart(2, '0');
             const yearCurrent = positionDataObject.currentPositionStartDate.getFullYear();
             const dateStrCurrent = `${dayCurrent}-${monthCurrent}-${yearCurrent}`;
-
+            
             const histWETHCurrent = await fetchHistoricalPrice('ethereum', dateStrCurrent);
             const histUSDCCurrent = await fetchHistoricalPrice('usd-coin', dateStrCurrent);
-            console.log(`[INVESTMENT-DEBUG] 3. CoinGecko Prices (Date: ${dateStrCurrent}): WETH=$${histWETHCurrent}, USDC=$${histUSDCCurrent}`);
-
-            console.log(`[INVESTMENT-DEBUG] 4. Token Decimals: ${t0.symbol}=${Number(t0.decimals)}, ${t1.symbol}=${Number(t1.decimals)}`);
+            
             const decimalAdjustment = Math.pow(10, Number(t1.decimals) - Number(t0.decimals));
-            console.log(`[INVESTMENT-DEBUG] 5. Decimal Adjustment: ${decimalAdjustment}`);
-            
             const historicalPriceOfToken0 = (t0.symbol === "WETH" ? histWETHCurrent / histUSDCCurrent : histUSDCCurrent / histWETHCurrent) * decimalAdjustment;
-            console.log(`[INVESTMENT-DEBUG] 6. Calculated Historical Price (Token0/Token1): ${historicalPriceOfToken0}`);
-            
             const estimatedHistoricalTick = Math.log(historicalPriceOfToken0) / Math.log(1.0001);
-            console.log(`[INVESTMENT-DEBUG] 7. Estimated Historical Tick: ${Math.round(estimatedHistoricalTick)}`);
-            
             const historicalSqrtPriceX96 = tickToSqrtPriceX96(Number(estimatedHistoricalTick));
-            console.log(`[INVESTMENT-DEBUG] 8. Estimated Historical SqrtPriceX96: ${historicalSqrtPriceX96.toString()}`);
 
             const [histAmt0Current_raw, histAmt1Current_raw] = getAmountsFromLiquidity(
                 pos.liquidity, historicalSqrtPriceX96, sqrtL, sqrtU
             );
-            console.log(`[INVESTMENT-DEBUG] 9. Raw Initial Amounts from Liquidity: Amount0=${histAmt0Current_raw.toString()}, Amount1=${histAmt1Current_raw.toString()}`);
 
             if (t0.symbol.toUpperCase() === "WETH") {
                 positionDataObject.histWETHamtCurrent = parseFloat(formatUnits(histAmt0Current_raw, t0.decimals));
@@ -363,19 +348,12 @@ async function getPositionsData(walletAddress) {
                 positionDataObject.histWETHamtCurrent = parseFloat(formatUnits(histAmt1Current_raw, t1.decimals));
                 positionDataObject.histUSDCamtCurrent = parseFloat(formatUnits(histAmt0Current_raw, t0.decimals));
             }
-            console.log(`[INVESTMENT-DEBUG] 10. Parsed Initial Amounts: WETH=${positionDataObject.histWETHamtCurrent.toFixed(18)}, USDC=${positionDataObject.histUSDCamtCurrent.toFixed(18)}`);
-
-            const initialWethValue = positionDataObject.histWETHamtCurrent * histWETHCurrent;
-            const initialUsdcValue = positionDataObject.histUSDCamtCurrent * histUSDCCurrent;
-            console.log(`[INVESTMENT-DEBUG] 11. Initial Dollar Values: WETH=$${initialWethValue.toFixed(2)}, USDC=$${initialUsdcValue.toFixed(2)}`);
             
-            positionDataObject.currentPositionInitialPrincipalUSD = initialWethValue + initialUsdcValue;
+            positionDataObject.currentPositionInitialPrincipalUSD = positionDataObject.histWETHamtCurrent * histWETHCurrent + positionDataObject.histUSDCamtCurrent * histUSDCCurrent;
             positionDataObject.positionHistoryAnalysisSucceeded = positionDataObject.currentPositionInitialPrincipalUSD > 0;
-            console.log(`[INVESTMENT-DEBUG] 12. Final Calculated Initial Investment: $${positionDataObject.currentPositionInitialPrincipalUSD.toFixed(2)}`);
-            console.log(`[INVESTMENT-DEBUG] --- End Historical Analysis for Token ID: ${tokenId.toString()} ---\n`);
 
         } catch (error) {
-            console.error(`[DEBUG] ERROR during historical analysis for token ${tokenId.toString()}:`, error);
+            console.error(`ERROR during historical analysis for token ${tokenId.toString()}:`, error);
             positionDataObject.historyError = error;
             positionDataObject.positionHistoryAnalysisSucceeded = false;
         }
@@ -383,7 +361,6 @@ async function getPositionsData(walletAddress) {
         positionsData.push(positionDataObject);
     }
     
-    console.log(`[DEBUG] Finished fetching data. Found ${positionsData.length} positions with value.`);
     return positionsData;
 }
 
@@ -408,7 +385,8 @@ async function getFormattedPositionData(walletAddress) {
 
         for (const data of allPositionsData) {
             let currentPositionMessage = "";
-            currentPositionMessage += `\n--- *Position #${data.i.toString()}* ---\n`;
+            // ++ CHANGE: Updated position header format ++
+            currentPositionMessage += `\n-------------- Position #${data.i.toString()} --------------\n`;
             currentPositionMessage += `🔹 Token ID: \`${data.tokenId.toString()}\`\n`;
             currentPositionMessage += `🔸 Pool: ${data.t0.symbol}/${data.t1.symbol} (${Number(data.pos.fee)/10000}% fee)\n`;
 
@@ -417,7 +395,8 @@ async function getFormattedPositionData(walletAddress) {
                     overallData.startDate = data.currentPositionStartDate;
                     overallData.startPrincipalUSD = data.currentPositionInitialPrincipalUSD;
                 }
-                currentPositionMessage += `📅 Created: ${data.currentPositionStartDate.toISOString().replace('T', ' ').slice(0, 19)}\n`;
+                const adjustedDate = new Date(data.currentPositionStartDate.getTime() + (2 * 60 * 60 * 1000));
+                currentPositionMessage += `📅 Created: ${adjustedDate.toISOString().replace('T', ' ').slice(0, 19)}\n`;
                 currentPositionMessage += `💰 Initial Investment: $${data.currentPositionInitialPrincipalUSD.toFixed(2)}\n`;
             } else {
                 const sanitizedErrorMessage = (data.historyError?.message || "Unknown error").replace(/[*_`[\]]/g, '');
@@ -508,7 +487,8 @@ async function getFormattedPositionData(walletAddress) {
             const totalReturnPercent = (totalReturn / overallData.startPrincipalUSD) * 100;
             const feesAPR = (rewardsPerYear / overallData.startPrincipalUSD) * 100;
 
-            responseMessage += `\n=== *OVERALL PORTFOLIO PERFORMANCE* ===\n`;
+            // ++ CHANGE: Updated overall performance header format ++
+            responseMessage += `\n====== OVERALL PERFORMANCE ======\n`;
             responseMessage += `(Based on the *${positionMessages.length}* displayed position(s))\n`;
             responseMessage += `🏛 Initial Investment: $${overallData.startPrincipalUSD.toFixed(2)}\n`;
             responseMessage += `🏛 Total Holdings: $${overallData.totalPortfolioPrincipalUSD.toFixed(2)}\n`;
@@ -533,14 +513,12 @@ async function getFormattedPositionData(walletAddress) {
 }
 
 
-// ++ NEW: Function to generate a snapshot image ++
 async function generateSnapshotImage(data) {
     const width = 720;
     const height = 1280;
     const canvas = createCanvas(width, height);
     const ctx = canvas.getContext('2d');
 
-    // Draw background
     try {
         if (fs.existsSync('background.jpg')) {
             const background = await loadImage('background.jpg');
@@ -555,7 +533,6 @@ async function generateSnapshotImage(data) {
         ctx.fillRect(0, 0, width, height);
     }
 
-    // Draw semi-transparent overlay
     ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
     ctx.fillRect(50, 200, width - 100, 600);
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
@@ -563,16 +540,14 @@ async function generateSnapshotImage(data) {
     ctx.strokeRect(50, 200, width - 100, 600);
 
 
-    // Draw text
     ctx.fillStyle = '#FFFFFF';
-    ctx.font = '42px Roboto';
+    ctx.font = '36px Roboto';
     ctx.textAlign = 'center';
-    ctx.fillText(`${data.tokenId} - ${data.pair}`, width / 2, 270);
+    ctx.fillText(`${data.timestamp} - ${data.pair} ${data.feeTier}`, width / 2, 270);
 
     ctx.font = '32px Roboto';
     ctx.textAlign = 'left';
 
-    // Helper to draw a line of text with a label and a value
     const drawLine = (label, value, y) => {
         ctx.fillStyle = '#cccccc';
         ctx.fillText(label, 70, y);
@@ -582,7 +557,6 @@ async function generateSnapshotImage(data) {
         ctx.textAlign = 'left';
     };
     
-    // Determine color for holdings change
     const holdingsChangeColor = data.holdingsChange.startsWith('-') ? '#FF6B6B' : '#63FF84';
 
     drawLine("Current Value:", data.currentValue, 350);
@@ -602,7 +576,6 @@ async function generateSnapshotImage(data) {
     return canvas.toBuffer('image/png');
 }
 
-// ++ NEW: Function to handle the /snapshot command ++
 async function handleSnapshotCommand(chatId) {
     try {
         console.log("[DEBUG] '/snapshot' command received. Starting generation...");
@@ -624,16 +597,21 @@ async function handleSnapshotCommand(chatId) {
             const totalPositionFeesUSD = feeUSD0 + feeUSD1;
             
             let feesAPR = "N/A";
+            let timestamp = "N/A";
+
             if (data.positionHistoryAnalysisSucceeded) {
                  const now = new Date();
                  const elapsedMs = now.getTime() - data.currentPositionStartDate.getTime();
                  const rewardsPerYear = elapsedMs > 0 ? totalPositionFeesUSD * (365.25 * 24 * 60 * 60 * 1000) / elapsedMs : 0;
                  feesAPR = `${((rewardsPerYear / data.currentPositionInitialPrincipalUSD) * 100).toFixed(2)}%`;
+                 const adjustedDate = new Date(data.currentPositionStartDate.getTime() + (2 * 60 * 60 * 1000));
+                 timestamp = adjustedDate.toISOString().replace('T', ' ').slice(0, 19);
             }
 
             const snapshotData = {
-                tokenId: `ID ${data.tokenId.toString()}`,
+                timestamp: timestamp,
                 pair: `${data.t0.symbol}/${data.t1.symbol}`,
+                feeTier: `${Number(data.pos.fee) / 10000}%`,
                 currentValue: `$${principalUSD.toFixed(2)}`,
                 holdingsChange: `${positionHoldingsChange.toFixed(2)}`,
                 t0Symbol: data.t0.symbol,
