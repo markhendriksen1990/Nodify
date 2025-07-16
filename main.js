@@ -4,6 +4,10 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 const { abi: FactoryAbi } = require('@uniswap/v3-core/artifacts/contracts/UniswapV3Factory.sol/UniswapV3Factory.json');
+const { createCanvas, loadImage, registerFont } = require('canvas');
+const FormData = require('form-data');
+const fs = require('fs');
+const path = require('path');
 
 
 // --- Configuration from Environment Variables ---
@@ -18,6 +22,18 @@ const provider = new ethers.JsonRpcProvider("https://base.publicnode.com");
 const managerAddress = "0x03a520b32c04bf3beef7beb72e919cf822ed34f1";
 const myAddress = "0x2FD24cC510b7a40b176B05A5Bb628d024e3B6886";
 const factoryAddress = '0x33128a8fC17869897dcE68Ed026d694621f6FDfD';
+
+// --- Register Font for Image Snapshots ---
+try {
+    if (fs.existsSync('Roboto-Regular.ttf')) {
+        registerFont('Roboto-Regular.ttf', { family: 'Roboto' });
+        console.log("Font 'Roboto-Regular.ttf' registered successfully.");
+    } else {
+        console.warn("Font file 'Roboto-Regular.ttf' not found. Text in snapshots may not render correctly.");
+    }
+} catch (e) {
+    console.error("Could not register font:", e);
+}
 
 
 // --- ABIs ---
@@ -248,211 +264,230 @@ async function fetchHistoricalPrice(coinId, dateStr) {
 }
 
 
-// --- Refactored LP Position Data Fetcher ---
+// --- Main Data Fetching and Formatting Logic ---
+async function getPositionsData(walletAddress) {
+    // This function will fetch all necessary data and return an array of position data objects
+    // It is designed to be called by both getFormattedPositionData and handleSnapshotCommand
+    
+    // ++ DEBUG: Announce start of data fetching
+    console.log("[DEBUG] Starting to fetch positions data...");
+    
+    const prices = await getUsdPrices();
+    const manager = new ethers.Contract(managerAddress, managerAbi, provider);
+    const factory = new ethers.Contract(factoryAddress, FactoryAbi, provider);
+    const balance = await manager.balanceOf(walletAddress);
+
+    if (balance === 0n) {
+        console.log("[DEBUG] No positions found.");
+        return [];
+    }
+    
+    const positionsData = [];
+
+    for (let i = 0n; i < balance; i++) {
+        const tokenId = await manager.tokenOfOwnerByIndex(walletAddress, i);
+        const pos = await manager.positions(tokenId);
+        const dynamicPoolAddress = await factory.getPool(pos.token0, pos.token1, pos.fee);
+
+        if (dynamicPoolAddress === ethers.ZeroAddress) {
+            console.warn(`[DEBUG] Skipping tokenId ${tokenId.toString()} as no valid pool was found.`);
+            continue;
+        }
+        
+        const pool = new ethers.Contract(dynamicPoolAddress, poolAbi, provider);
+        const slot0 = await pool.slot0();
+        const token0Addr = await pool.token0();
+        const token1Addr = await pool.token1();
+        
+        const sqrtP = slot0[0];
+        const nativeTick = slot0[1];
+
+        const t0 = await getTokenMeta(token0Addr);
+        const t1 = await getTokenMeta(token1Addr);
+
+        const [sqrtL, sqrtU] = [
+            tickToSqrtPriceX96(Number(pos.tickLower)),
+            tickToSqrtPriceX96(Number(pos.tickUpper))
+        ];
+        const [raw0, raw1] = getAmountsFromLiquidity(pos.liquidity, sqrtP, sqrtL, sqrtU);
+        const amt0 = parseFloat(formatUnits(raw0, t0.decimals));
+        const amt1 = parseFloat(formatUnits(raw1, t1.decimals));
+
+        const xp = await manager.collect.staticCall({
+            tokenId, recipient: walletAddress, amount0Max: UINT128_MAX, amount1Max: UINT128_MAX
+        });
+        const fee0 = parseFloat(formatUnits(xp[0], t0.decimals));
+        const fee1 = parseFloat(formatUnits(xp[1], t1.decimals));
+
+        if (amt0 === 0 && amt1 === 0 && fee0 === 0 && fee1 === 0) {
+            continue;
+        }
+        
+        const positionDataObject = {
+            i,
+            tokenId,
+            t0,
+            t1,
+            pos,
+            nativeTick,
+            amt0,
+            amt1,
+            fee0,
+            fee1,
+            prices
+        };
+
+        // Historical Analysis
+        try {
+            // ++ DEBUG: Announce start of historical analysis for a token
+            console.log(`[DEBUG] Processing mint data for Token ID: ${tokenId.toString()}`);
+            const mintBlock = await getMintEventBlock(manager, tokenId, provider, walletAddress);
+            console.log(`[DEBUG] Found mintBlock: ${mintBlock} for token ${tokenId.toString()}`);
+
+            const startTimestampMs = await getBlockTimestamp(mintBlock);
+            positionDataObject.currentPositionStartDate = new Date(startTimestampMs);
+
+            const dayCurrent = positionDataObject.currentPositionStartDate.getDate().toString().padStart(2, '0');
+            const monthCurrent = (positionDataObject.currentPositionStartDate.getMonth() + 1).toString().padStart(2, '0');
+            const yearCurrent = positionDataObject.currentPositionStartDate.getFullYear();
+            const dateStrCurrent = `${dayCurrent}-${monthCurrent}-${yearCurrent}`;
+            
+            const histWETHCurrent = await fetchHistoricalPrice('ethereum', dateStrCurrent);
+            const histUSDCCurrent = await fetchHistoricalPrice('usd-coin', dateStrCurrent);
+            
+            const historicalSlot0 = await pool.slot0({ blockTag: mintBlock });
+            const historicalTick = historicalSlot0.tick;
+            const historicalSqrtPriceX96 = tickToSqrtPriceX96(historicalTick);
+
+            const [histAmt0Current_raw, histAmt1Current_raw] = getAmountsFromLiquidity(
+                pos.liquidity, historicalSqrtPriceX96, sqrtL, sqrtU
+            );
+
+            if (t0.symbol.toUpperCase() === "WETH") {
+                positionDataObject.histWETHamtCurrent = parseFloat(formatUnits(histAmt0Current_raw, t0.decimals));
+                positionDataObject.histUSDCamtCurrent = parseFloat(formatUnits(histAmt1Current_raw, t1.decimals));
+            } else {
+                positionDataObject.histWETHamtCurrent = parseFloat(formatUnits(histAmt1Current_raw, t1.decimals));
+                positionDataObject.histUSDCamtCurrent = parseFloat(formatUnits(histAmt0Current_raw, t0.decimals));
+            }
+            
+            // ++ DEBUG: Log the values used in the initial investment calculation
+            console.log(`[DEBUG] Mint Date: ${dateStrCurrent}, Historical WETH Price: $${histWETHCurrent}, Historical USDC Price: $${histUSDCCurrent}`);
+            console.log(`[DEBUG] Calculated Initial WETH: ${positionDataObject.histWETHamtCurrent}, Calculated Initial USDC: ${positionDataObject.histUSDCamtCurrent}`);
+
+            positionDataObject.currentPositionInitialPrincipalUSD = positionDataObject.histWETHamtCurrent * histWETHCurrent + positionDataObject.histUSDCamtCurrent * histUSDCCurrent;
+            positionDataObject.positionHistoryAnalysisSucceeded = positionDataObject.currentPositionInitialPrincipalUSD > 0;
+
+        } catch (error) {
+            // ++ DEBUG: Log the full error object if historical analysis fails
+            console.error(`[DEBUG] ERROR during historical analysis for token ${tokenId.toString()}:`, error);
+            positionDataObject.historyError = error;
+            positionDataObject.positionHistoryAnalysisSucceeded = false;
+        }
+        
+        positionsData.push(positionDataObject);
+    }
+    
+    // ++ DEBUG: Announce end of data fetching
+    console.log(`[DEBUG] Finished fetching data. Found ${positionsData.length} positions with value.`);
+    return positionsData;
+}
+
+
 async function getFormattedPositionData(walletAddress) {
     let responseMessage = "";
-    let prices = { WETH: 0, USDC: 0 };
-
+    
     try {
-        prices = await getUsdPrices();
+        const allPositionsData = await getPositionsData(walletAddress);
 
-        const manager = new ethers.Contract(managerAddress, managerAbi, provider);
-        const factory = new ethers.Contract(factoryAddress, FactoryAbi, provider);
-
-        const balance = await manager.balanceOf(walletAddress);
-
-        if (balance === 0n) {
-            return `*👜 Wallet: ${walletAddress.substring(0, 6)}...${walletAddress.substring(38)}*\n\n✨ You own *0* Uniswap V3 positions.`;
+        if (allPositionsData.length === 0) {
+            return `*👜 Wallet: ${walletAddress.substring(0, 6)}...${walletAddress.substring(38)}*\n\n✨ You own *0* Uniswap V3 positions with value.`;
         }
-
-        let totalFeeUSD = 0;
-        let startPrincipalUSD = null;
-        let startDate = null;
-        let currentTotalPortfolioValue = 0;
-        let totalPortfolioPrincipalUSD = 0;
         
         const positionMessages = [];
+        let overallData = {
+            totalFeeUSD: 0,
+            startPrincipalUSD: null,
+            startDate: null,
+            currentTotalPortfolioValue: 0,
+            totalPortfolioPrincipalUSD: 0
+        };
 
-        for (let i = 0n; i < balance; i++) {
-            const tokenId = await manager.tokenOfOwnerByIndex(walletAddress, i);
-            const pos = await manager.positions(tokenId);
-
-            const dynamicPoolAddress = await factory.getPool(pos.token0, pos.token1, pos.fee);
-
-            if (dynamicPoolAddress === ethers.ZeroAddress) {
-                console.warn(`Skipping tokenId ${tokenId.toString()} as no valid pool was found.`);
-                continue;
-            }
-            
-            const pool = new ethers.Contract(dynamicPoolAddress, poolAbi, provider);
-
-            const [slot0, token0Addr, token1Addr] = await Promise.all([
-                pool.slot0(),
-                pool.token0(),
-                pool.token1()
-            ]);
-            
-            const sqrtP = slot0[0];
-            const nativeTick = slot0[1];
-
-            const [t0, t1] = await Promise.all([
-                getTokenMeta(token0Addr),
-                getTokenMeta(token1Addr)
-            ]);
-
-            const [sqrtL, sqrtU] = [
-                tickToSqrtPriceX96(Number(pos.tickLower)),
-                tickToSqrtPriceX96(Number(pos.tickUpper))
-            ];
-            const [raw0, raw1] = getAmountsFromLiquidity(pos.liquidity, sqrtP, sqrtL, sqrtU);
-            const amt0 = parseFloat(formatUnits(raw0, t0.decimals));
-            const amt1 = parseFloat(formatUnits(raw1, t1.decimals));
-
-            const xp = await manager.collect.staticCall({
-                tokenId, recipient: walletAddress, amount0Max: UINT128_MAX, amount1Max: UINT128_MAX
-            });
-            const fee0 = parseFloat(formatUnits(xp[0], t0.decimals));
-            const fee1 = parseFloat(formatUnits(xp[1], t1.decimals));
-
-            if (amt0 === 0 && amt1 === 0 && fee0 === 0 && fee1 === 0) {
-                continue;
-            }
-
+        for (const data of allPositionsData) {
             let currentPositionMessage = "";
-            currentPositionMessage += `\n--- *Position #${i.toString()}* ---\n`;
-            currentPositionMessage += `🔹 Token ID: \`${tokenId.toString()}\`\n`;
-            currentPositionMessage += `🔸 Pool: ${t0.symbol}/${t1.symbol} (${Number(pos.fee)/10000}% fee)\n`;
+            currentPositionMessage += `\n--- *Position #${data.i.toString()}* ---\n`;
+            currentPositionMessage += `🔹 Token ID: \`${data.tokenId.toString()}\`\n`;
+            currentPositionMessage += `🔸 Pool: ${data.t0.symbol}/${data.t1.symbol} (${Number(data.pos.fee)/10000}% fee)\n`;
 
-            let currentPositionStartDate = null;
-            let currentPositionInitialPrincipalUSD = 0;
-            let positionHistoryAnalysisSucceeded = false;
-
-            try {
-                const mintBlock = await getMintEventBlock(manager, tokenId, provider, walletAddress);
-                const startTimestampMs = await getBlockTimestamp(mintBlock);
-                currentPositionStartDate = new Date(startTimestampMs);
-
-                if (!startDate || currentPositionStartDate.getTime() < startDate.getTime()) {
-                    startDate = currentPositionStartDate;
+            if (data.positionHistoryAnalysisSucceeded) {
+                if (!overallData.startDate || data.currentPositionStartDate.getTime() < overallData.startDate.getTime()) {
+                    overallData.startDate = data.currentPositionStartDate;
+                    overallData.startPrincipalUSD = data.currentPositionInitialPrincipalUSD;
                 }
-
-                const dayCurrent = currentPositionStartDate.getDate().toString().padStart(2, '0');
-                const monthCurrent = (currentPositionStartDate.getMonth() + 1).toString().padStart(2, '0');
-                const yearCurrent = currentPositionStartDate.getFullYear();
-                const dateStrCurrent = `${dayCurrent}-${monthCurrent}-${yearCurrent}`;
-
-                const histWETHCurrent = await fetchHistoricalPrice('ethereum', dateStrCurrent);
-                const histUSDCCurrent = await fetchHistoricalPrice('usd-coin', dateStrCurrent);
-
-                // ++ FIX: Calculate the estimated historical tick from CoinGecko prices ++
-                // This avoids the direct historical on-chain call that was failing.
-                const historicalPriceOfToken0 = t0.symbol === "WETH" ? histWETHCurrent / histUSDCCurrent : histUSDCCurrent / histWETHCurrent;
-                const estimatedHistoricalTick = Math.log(historicalPriceOfToken0) / Math.log(1.0001);
-                const historicalSqrtPriceX96 = tickToSqrtPriceX96(Math.round(estimatedHistoricalTick));
-
-                const [histAmt0Current_raw, histAmt1Current_raw] = getAmountsFromLiquidity(
-                    pos.liquidity,
-                    historicalSqrtPriceX96,
-                    tickToSqrtPriceX96(Number(pos.tickLower)),
-                    tickToSqrtPriceX96(Number(pos.tickUpper))
-                );
-
-                let histWETHamtCurrent = 0, histUSDCamtCurrent = 0;
-                if (t0.symbol.toUpperCase() === "WETH") {
-                    histWETHamtCurrent = parseFloat(formatUnits(histAmt0Current_raw, t0.decimals));
-                    histUSDCamtCurrent = parseFloat(formatUnits(histAmt1Current_raw, t1.decimals));
-                } else {
-                    histWETHamtCurrent = parseFloat(formatUnits(histAmt1Current_raw, t1.decimals));
-                    histUSDCamtCurrent = parseFloat(formatUnits(histAmt0Current_raw, t0.decimals));
-                }
-                
-                console.log(`--- Debugging Initial Investment for Token ID: ${tokenId.toString()} ---`);
-                console.log(`Mint Date: ${dateStrCurrent}`);
-                console.log(`Historical WETH Price: $${histWETHCurrent}`);
-                console.log(`Historical USDC Price: $${histUSDCCurrent}`);
-                console.log(`Calculated Historical WETH Amount: ${histWETHamtCurrent}`);
-                console.log(`Calculated Historical USDC Amount: ${histUSDCamtCurrent}`);
-
-                currentPositionInitialPrincipalUSD = histWETHamtCurrent * histWETHCurrent + histUSDCamtCurrent * histUSDCCurrent;
-                
-                console.log(`Total Initial Investment Calculated: $${currentPositionInitialPrincipalUSD.toFixed(2)}`);
-                console.log('----------------------------------------------------');
-
-
-                if (currentPositionInitialPrincipalUSD > 0) {
-                    positionHistoryAnalysisSucceeded = true;
-                }
-
-                if (positionHistoryAnalysisSucceeded && (startPrincipalUSD === null || currentPositionStartDate.getTime() === startDate.getTime())) {
-                    startPrincipalUSD = currentPositionInitialPrincipalUSD;
-                }
-
-                currentPositionMessage += `📅 Created: ${currentPositionStartDate.toISOString().replace('T', ' ').slice(0, 19)}\n`;
-                currentPositionMessage += `💰 Initial Investment: $${currentPositionInitialPrincipalUSD.toFixed(2)}\n`;
-            } catch (error) {
-                console.error(`[DEBUG] ERROR during historical analysis for token ${tokenId.toString()}:`, error);
-                const sanitizedErrorMessage = (error.message || "Unknown error").replace(/[*_`[\]]/g, '');
+                currentPositionMessage += `📅 Created: ${data.currentPositionStartDate.toISOString().replace('T', ' ').slice(0, 19)}\n`;
+                currentPositionMessage += `💰 Initial Investment: $${data.currentPositionInitialPrincipalUSD.toFixed(2)}\n`;
+            } else {
+                const sanitizedErrorMessage = (data.historyError?.message || "Unknown error").replace(/[*_`[\]]/g, '');
                 currentPositionMessage += `⚠️ Could not analyze position history: ${sanitizedErrorMessage}\n`;
             }
 
-            const lowerPrice = tickToPricePerToken0(Number(pos.tickLower), Number(t0.decimals), Number(t1.decimals));
-            const upperPrice = tickToPricePerToken0(Number(pos.tickUpper), Number(t0.decimals), Number(t1.decimals));
-            const currentPrice = tickToPricePerToken0(Number(nativeTick), Number(t0.decimals), Number(t1.decimals));
-
-            currentPositionMessage += `\n*Price Information*\n`;
-            currentPositionMessage += `Range: $${lowerPrice.toFixed(2)} - $${upperPrice.toFixed(2)} ${t1.symbol}/${t0.symbol}\n`;
-            currentPositionMessage += `🌐 Current Price: $${currentPrice.toFixed(2)} ${t1.symbol}/${t0.symbol}\n`;
-
-            const inRange = nativeTick >= pos.tickLower && nativeTick < pos.tickUpper;
-            currentPositionMessage += `📍 In Range? ${inRange ? "✅ Yes" : "❌ No"}\n`;
+            const lowerPrice = tickToPricePerToken0(Number(data.pos.tickLower), Number(data.t0.decimals), Number(data.t1.decimals));
+            const upperPrice = tickToPricePerToken0(Number(data.pos.tickUpper), Number(data.t0.decimals), Number(data.t1.decimals));
+            const currentPrice = tickToPricePerToken0(Number(data.nativeTick), Number(data.t0.decimals), Number(data.t1.decimals));
             
             let amtWETH = 0, amtUSDC = 0;
-            if (t0.symbol.toUpperCase() === "WETH") {
-                amtWETH = amt0; amtUSDC = amt1;
+            if (data.t0.symbol.toUpperCase() === "WETH") {
+                amtWETH = data.amt0; amtUSDC = data.amt1;
             } else {
-                amtWETH = amt1; amtUSDC = amt0;
+                amtWETH = data.amt1; amtUSDC = data.amt0;
             }
+            const ratio = getRatio(amtWETH * data.prices.WETH, amtUSDC * data.prices.USDC);
 
-            const principalUSD = amtWETH * prices.WETH + amtUSDC * prices.USDC;
-            totalPortfolioPrincipalUSD += principalUSD;
+            currentPositionMessage += `\n*Price Information*\n`;
+            currentPositionMessage += `Range: $${lowerPrice.toFixed(2)} - $${upperPrice.toFixed(2)} ${data.t1.symbol}/${data.t0.symbol}\n`;
+            currentPositionMessage += `Current Price: $${currentPrice.toFixed(2)} ${data.t1.symbol}/${data.t0.symbol}\n`;
+            currentPositionMessage += `Ratio: WETH/USDC ${ratio.weth}/${ratio.usdc}%\n`;
 
-            const ratio = getRatio(amtWETH * prices.WETH, amtUSDC * prices.USDC);
+            const inRange = data.nativeTick >= data.pos.tickLower && data.nativeTick < data.pos.tickUpper;
+            currentPositionMessage += `📍 In Range? ${inRange ? "✅ Yes" : "❌ No"}\n`;
+            
+            const principalUSD = amtWETH * data.prices.WETH + amtUSDC * data.prices.USDC;
+            overallData.totalPortfolioPrincipalUSD += principalUSD;
 
             currentPositionMessage += `\n*Current Holdings*\n`;
-            currentPositionMessage += `🏛 ${formatTokenAmount(amtWETH, 6)} WETH ($${(amtWETH * prices.WETH).toFixed(2)})\n`;
-            currentPositionMessage += `🏛 ${formatTokenAmount(amtUSDC, 2)} USDC ($${(amtUSDC * prices.USDC).toFixed(2)})\n`;
-            currentPositionMessage += `🏛 Ratio: WETH/USDC ${ratio.weth}/${ratio.usdc}%\n`;
+            currentPositionMessage += `🏛 ${formatTokenAmount(amtWETH, 6)} WETH ($${(amtWETH * data.prices.WETH).toFixed(2)})\n`;
+            currentPositionMessage += `🏛 ${formatTokenAmount(amtUSDC, 2)} USDC ($${(amtUSDC * data.prices.USDC).toFixed(2)})\n`;
             currentPositionMessage += `🏛 Holdings: *$${principalUSD.toFixed(2)}*\n`;
 
-            const positionHoldingsChange = principalUSD - currentPositionInitialPrincipalUSD;
-            if (positionHistoryAnalysisSucceeded && currentPositionInitialPrincipalUSD > 0) {
+            const positionHoldingsChange = principalUSD - data.currentPositionInitialPrincipalUSD;
+            if (data.positionHistoryAnalysisSucceeded) {
                 currentPositionMessage += `📈 Holdings change: $${positionHoldingsChange.toFixed(2)}\n`;
             }
             
-            const feeUSD0 = fee0 * (t0.symbol.toUpperCase() === "WETH" ? prices.WETH : prices.USDC);
-            const feeUSD1 = fee1 * (t1.symbol.toUpperCase() === "WETH" ? prices.WETH : prices.USDC);
+            const feeUSD0 = data.fee0 * (data.t0.symbol.toUpperCase() === "WETH" ? data.prices.WETH : data.prices.USDC);
+            const feeUSD1 = data.fee1 * (data.t1.symbol.toUpperCase() === "WETH" ? data.prices.WETH : data.prices.USDC);
             const totalPositionFeesUSD = feeUSD0 + feeUSD1;
 
             currentPositionMessage += `\n*Uncollected Fees*\n`;
-            currentPositionMessage += `💰 ${formatTokenAmount(fee0, 6)} ${t0.symbol} ($${feeUSD0.toFixed(2)})\n`;
-            currentPositionMessage += `💰 ${formatTokenAmount(fee1, 2)} ${t1.symbol} ($${feeUSD1.toFixed(2)})\n`;
+            currentPositionMessage += `💰 ${formatTokenAmount(data.fee0, 6)} ${data.t0.symbol} ($${feeUSD0.toFixed(2)})\n`;
+            currentPositionMessage += `💰 ${formatTokenAmount(data.fee1, 2)} ${data.t1.symbol} ($${feeUSD1.toFixed(2)})\n`;
             currentPositionMessage += `💰 Total Fees: *$${totalPositionFeesUSD.toFixed(2)}*\n`;
 
-            if (positionHistoryAnalysisSucceeded && currentPositionInitialPrincipalUSD !== null && currentPositionInitialPrincipalUSD > 0) {
+            if (data.positionHistoryAnalysisSucceeded) {
                 const now = new Date();
-                const elapsedMs = now.getTime() - currentPositionStartDate.getTime();
+                const elapsedMs = now.getTime() - data.currentPositionStartDate.getTime();
                 const rewardsPerHour = elapsedMs > 0 ? totalPositionFeesUSD / (elapsedMs / 1000 / 60 / 60) : 0;
                 const rewardsPerDay = rewardsPerHour * 24;
                 const rewardsPerMonth = rewardsPerDay * 30.44;
                 const rewardsPerYear = rewardsPerDay * 365.25;
-                const feesAPR = (rewardsPerYear / currentPositionInitialPrincipalUSD) * 100;
+                const feesAPR = (rewardsPerYear / data.currentPositionInitialPrincipalUSD) * 100;
 
                 currentPositionMessage += `\n*Fee Performance*\n`;
-                currentPositionMessage += `💰 Fees per hour: $${rewardsPerHour.toFixed(2)}\n`;
-                currentPositionMessage += `💰 Fees per day: $${rewardsPerDay.toFixed(2)}\n`;
-                currentPositionMessage += `💰 Fees per month: $${rewardsPerMonth.toFixed(2)}\n`;
-                currentPositionMessage += `💰 Fees per year: $${rewardsPerYear.toFixed(2)}\n`;
-                currentPositionMessage += `💰 Fees APR: ${feesAPR.toFixed(2)}%\n`;
+                currentPositionMessage += `💧 Fees per hour: $${rewardsPerHour.toFixed(2)}\n`;
+                currentPositionMessage += `💧 Fees per day: $${rewardsPerDay.toFixed(2)}\n`;
+                currentPositionMessage += `💧 Fees per month: $${rewardsPerMonth.toFixed(2)}\n`;
+                currentPositionMessage += `💧 Fees per year: $${rewardsPerYear.toFixed(2)}\n`;
+                currentPositionMessage += `💧 Fees APR: ${feesAPR.toFixed(2)}%\n`;
             } else {
                 currentPositionMessage += `\n⚠️ Could not determine per-position fee performance (initial investment unknown or zero).\n`;
             }
@@ -460,42 +495,41 @@ async function getFormattedPositionData(walletAddress) {
             const currentTotalValue = principalUSD + totalPositionFeesUSD;
             currentPositionMessage += `\n🏦 Position Value: *$${currentTotalValue.toFixed(2)}*\n`;
 
-            const positionReturn = principalUSD - currentPositionInitialPrincipalUSD;
+            const positionReturn = principalUSD - data.currentPositionInitialPrincipalUSD;
             const positionTotalGains = positionReturn + totalPositionFeesUSD;
-            if (positionHistoryAnalysisSucceeded && currentPositionInitialPrincipalUSD > 0) {
+            if (data.positionHistoryAnalysisSucceeded) {
                 currentPositionMessage += `📈 Position Total return + Fees: $${positionTotalGains.toFixed(2)}\n`;
             }
 
-            totalFeeUSD += totalPositionFeesUSD;
-            currentTotalPortfolioValue += currentTotalValue;
+            overallData.totalFeeUSD += totalPositionFeesUSD;
             
             positionMessages.push(currentPositionMessage);
         }
 
         responseMessage = `*👜 Wallet: ${walletAddress.substring(0, 6)}...${walletAddress.substring(38)}*\n\n`;
-        responseMessage += `✨ Displaying *${positionMessages.length}* of *${balance.toString()}* total positions with value.\n`;
+        responseMessage += `✨ Displaying *${positionMessages.length}* of *${allPositionsData.length}* total positions with value.\n`;
 
         responseMessage += positionMessages.join('');
 
-        if (startDate && startPrincipalUSD !== null && positionMessages.length > 0) {
+        if (overallData.startDate && overallData.startPrincipalUSD !== null) {
             const now = new Date();
-            const elapsedMs = now.getTime() - startDate.getTime();
-            const rewardsPerYear = elapsedMs > 0 ? totalFeeUSD * (365.25 * 24 * 60 * 60 * 1000) / elapsedMs : 0;
-            const totalReturn = totalPortfolioPrincipalUSD - startPrincipalUSD;
-            const totalReturnPercent = (totalReturn / startPrincipalUSD) * 100;
-            const feesAPR = (rewardsPerYear / startPrincipalUSD) * 100;
+            const elapsedMs = now.getTime() - overallData.startDate.getTime();
+            const rewardsPerYear = elapsedMs > 0 ? overallData.totalFeeUSD * (365.25 * 24 * 60 * 60 * 1000) / elapsedMs : 0;
+            const totalReturn = overallData.totalPortfolioPrincipalUSD - overallData.startPrincipalUSD;
+            const totalReturnPercent = (totalReturn / overallData.startPrincipalUSD) * 100;
+            const feesAPR = (rewardsPerYear / overallData.startPrincipalUSD) * 100;
 
             responseMessage += `\n=== *OVERALL PORTFOLIO PERFORMANCE* ===\n`;
             responseMessage += `(Based on the *${positionMessages.length}* displayed position(s))\n`;
-            responseMessage += `🏛 Initial Investment: $${startPrincipalUSD.toFixed(2)}\n`;
-            responseMessage += `🏛 Total Holdings: $${totalPortfolioPrincipalUSD.toFixed(2)}\n`;
+            responseMessage += `🏛 Initial Investment: $${overallData.startPrincipalUSD.toFixed(2)}\n`;
+            responseMessage += `🏛 Total Holdings: $${overallData.totalPortfolioPrincipalUSD.toFixed(2)}\n`;
             responseMessage += `📈 Holdings Change: $${totalReturn.toFixed(2)} (${totalReturnPercent.toFixed(2)}%)\n`;
 
             responseMessage += `\n*Fee Performance*\n`;
-            responseMessage += `💰 Total Fees Earned: $${totalFeeUSD.toFixed(2)}\n`;
+            responseMessage += `💰 Total Fees Earned: $${overallData.totalFeeUSD.toFixed(2)}\n`;
             responseMessage += `💰 Fees APR: ${feesAPR.toFixed(2)}%\n`;
 
-            const allTimeGains = totalReturn + totalFeeUSD;
+            const allTimeGains = totalReturn + overallData.totalFeeUSD;
             responseMessage += `\n📈 Total return + Fees: $${allTimeGains.toFixed(2)}\n`;
         } else if (positionMessages.length > 0) {
             responseMessage += `\n⚠️ Could not determine overall portfolio performance (initial investment unknown).\n`;
@@ -507,6 +541,130 @@ async function getFormattedPositionData(walletAddress) {
         responseMessage = `An error occurred while fetching liquidity positions: ${sanitizedErrorMessage}. Please try again later.`;
     }
     return responseMessage;
+}
+
+// ++ NEW: Function to generate a snapshot image ++
+async function generateSnapshotImage(data) {
+    const width = 720;
+    const height = 1280;
+    const canvas = createCanvas(width, height);
+    const ctx = canvas.getContext('2d');
+
+    // Draw background
+    try {
+        if (fs.existsSync('background.jpg')) {
+            const background = await loadImage('background.jpg');
+            ctx.drawImage(background, 0, 0, width, height);
+        } else {
+            ctx.fillStyle = '#1a202c';
+            ctx.fillRect(0, 0, width, height);
+        }
+    } catch (e) {
+        console.error("Could not load background image:", e);
+        ctx.fillStyle = '#1a202c';
+        ctx.fillRect(0, 0, width, height);
+    }
+
+    // Draw semi-transparent overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
+    ctx.fillRect(50, 200, width - 100, 600);
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(50, 200, width - 100, 600);
+
+
+    // Draw text
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = '42px Roboto';
+    ctx.textAlign = 'center';
+    ctx.fillText(`${data.tokenId} - ${data.pair}`, width / 2, 270);
+
+    ctx.font = '32px Roboto';
+    ctx.textAlign = 'left';
+
+    // Helper to draw a line of text with a label and a value
+    const drawLine = (label, value, y) => {
+        ctx.fillStyle = '#cccccc';
+        ctx.fillText(label, 70, y);
+        ctx.fillStyle = '#FFFFFF';
+        ctx.textAlign = 'right';
+        ctx.fillText(value, width - 70, y);
+        ctx.textAlign = 'left';
+    };
+    
+    // Determine color for holdings change
+    const holdingsChangeColor = data.holdingsChange.startsWith('-') ? '#FF6B6B' : '#63FF84';
+
+    drawLine("Current Value:", data.currentValue, 350);
+    
+    // Draw holdings change with color
+    ctx.fillStyle = '#cccccc';
+    ctx.fillText("Holdings Change:", 70, 410);
+    ctx.fillStyle = holdingsChangeColor;
+    ctx.textAlign = 'right';
+    ctx.fillText(data.holdingsChange, width - 70, 410);
+    ctx.textAlign = 'left';
+
+    drawLine(`Uncollected ${data.t0Symbol}:`, data.fees0, 500);
+    drawLine(`Uncollected ${data.t1Symbol}:`, data.fees1, 560);
+    drawLine("Total Fees:", data.totalFees, 620);
+    drawLine("Fees APR:", data.feesAPR, 680);
+
+    return canvas.toBuffer('image/png');
+}
+
+// ++ NEW: Function to handle the /snapshot command ++
+async function handleSnapshotCommand(chatId) {
+    try {
+        console.log("[DEBUG] '/snapshot' command received. Starting generation...");
+        await sendChatAction(chatId, 'upload_photo');
+        const allPositionsData = await getPositionsData(myAddress);
+
+        if (allPositionsData.length === 0) {
+            await sendMessage(chatId, "No positions with value found to create a snapshot.");
+            return;
+        }
+
+        for (const data of allPositionsData) {
+            console.log(`[DEBUG] [Snapshot] Generating image for tokenId: ${data.tokenId.toString()}`);
+            const principalUSD = (data.amt0 * data.prices.WETH) + (data.amt1 * data.prices.USDC);
+            const positionHoldingsChange = principalUSD - data.currentPositionInitialPrincipalUSD;
+            const feeUSD0 = data.fee0 * (data.t0.symbol.toUpperCase() === "WETH" ? data.prices.WETH : data.prices.USDC);
+            const feeUSD1 = data.fee1 * (data.t1.symbol.toUpperCase() === "WETH" ? data.prices.WETH : data.prices.USDC);
+            const totalPositionFeesUSD = feeUSD0 + feeUSD1;
+            
+            let feesAPR = "N/A";
+            if (data.positionHistoryAnalysisSucceeded) {
+                 const now = new Date();
+                 const elapsedMs = now.getTime() - data.currentPositionStartDate.getTime();
+                 const rewardsPerYear = elapsedMs > 0 ? totalPositionFeesUSD * (365.25 * 24 * 60 * 60 * 1000) / elapsedMs : 0;
+                 feesAPR = `${((rewardsPerYear / data.currentPositionInitialPrincipalUSD) * 100).toFixed(2)}%`;
+            }
+
+            const snapshotData = {
+                tokenId: `ID ${data.tokenId.toString()}`,
+                pair: `${data.t0.symbol}/${data.t1.symbol}`,
+                currentValue: `$${principalUSD.toFixed(2)}`,
+                holdingsChange: `${positionHoldingsChange.toFixed(2)}`,
+                t0Symbol: data.t0.symbol,
+                t1Symbol: data.t1.symbol,
+                fees0: formatTokenAmount(data.fee0, 6),
+                fees1: formatTokenAmount(data.fee1, 2),
+                totalFees: `$${totalPositionFeesUSD.toFixed(2)}`,
+                feesAPR: feesAPR
+            };
+            
+            console.log("[DEBUG] [Snapshot] Data for image:", snapshotData);
+
+            const imageBuffer = await generateSnapshotImage(snapshotData);
+            console.log(`[DEBUG] [Snapshot] Image buffer created for tokenId: ${data.tokenId.toString()}. Sending to Telegram...`);
+            await sendPhoto(chatId, imageBuffer);
+        }
+
+    } catch (error) {
+        console.error("Error handling /snapshot command:", error);
+        await sendMessage(chatId, "An error occurred while generating snapshots.");
+    }
 }
 
 
@@ -542,10 +700,13 @@ async function processTelegramCommand(update) {
                 console.error("Error processing /positions command asynchronously:", error);
                 await sendMessage(chatId, "Sorry, I encountered an internal error while fetching positions. Please try again later.");
             }
+        // ++ NEW: Handle the /snapshot command ++
+        } else if (messageText && messageText.startsWith('/snapshot')) {
+             await handleSnapshotCommand(chatId);
         } else if (messageText && messageText.startsWith('/start')) {
-            await sendMessage(chatId, "Welcome! I can provide you with information about your Uniswap V3 liquidity positions. Type /positions to get a summary.");
+            await sendMessage(chatId, "Welcome! I can provide you with information about your Uniswap V3 liquidity positions. Type /positions for a text summary or /snapshot for an image summary.");
         } else {
-            await sendMessage(chatId, "I received your message, but I only understand the /positions command. If you want to see your positions, type /positions or select it from the menu.");
+            await sendMessage(chatId, "I received your message, but I only understand the /positions and /snapshot commands. Please select one from the menu.");
         }
     }
 }
@@ -571,6 +732,37 @@ async function sendMessage(chatId, text) {
         console.error('Error sending message to Telegram:', error);
     }
 }
+
+// ++ NEW: Function to send photos to Telegram ++
+async function sendPhoto(chatId, photoBuffer, caption = '') {
+    const form = new FormData();
+    form.append('chat_id', chatId);
+    form.append('photo', photoBuffer, {
+        filename: 'snapshot.png',
+        contentType: 'image/png',
+    });
+    if (caption) {
+        form.append('caption', caption);
+    }
+
+    const telegramApiUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`;
+    try {
+        const response = await fetch(telegramApiUrl, {
+            method: 'POST',
+            body: form,
+            headers: form.getHeaders(),
+        });
+        const data = await response.json();
+        if (!response.ok) {
+            console.error('Failed to send photo:', data);
+        } else {
+             console.log(`[DEBUG] [Snapshot] Successfully sent photo to chat ID: ${chatId}`);
+        }
+    } catch (error) {
+        console.error('Error sending photo to Telegram:', error);
+    }
+}
+
 
 async function sendChatAction(chatId, action) {
     const telegramApiUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendChatAction`;
