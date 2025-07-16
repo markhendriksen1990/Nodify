@@ -70,38 +70,23 @@ function tickToSqrtPriceX96(tick) {
     return BigInt(Math.floor(product));
 }
 
-// ++ DEBUG: Added extensive logging inside this function ++
 function getAmountsFromLiquidity(liquidity, sqrtPriceX96, sqrtLowerX96, sqrtUpperX96) {
-    console.log('\n[DEBUG] --- Inside getAmountsFromLiquidity ---');
-    console.log(`[DEBUG] Liquidity: ${liquidity.toString()}`);
-    console.log(`[DEBUG] SqrtPrice: ${sqrtPriceX96.toString()}`);
-    console.log(`[DEBUG] SqrtLower: ${sqrtLowerX96.toString()}`);
-    console.log(`[DEBUG] SqrtUpper: ${sqrtUpperX96.toString()}`);
-
     liquidity = BigInt(liquidity);
     sqrtPriceX96 = BigInt(sqrtPriceX96);
     sqrtLowerX96 = BigInt(sqrtLowerX96 || 0n);
     sqrtUpperX96 = BigInt(sqrtUpperX96 || 0n);
     let amount0 = 0n;
     let amount1 = 0n;
-
     if (sqrtPriceX96 <= sqrtLowerX96) {
-        console.log('[DEBUG] Path Taken: Price is AT OR BELOW lower bound.');
         amount0 = liquidity * (sqrtUpperX96 - sqrtLowerX96) * (1n << 96n) / (sqrtLowerX96 * sqrtUpperX96);
     } else if (sqrtPriceX96 < sqrtUpperX96) {
-        console.log('[DEBUG] Path Taken: Price is IN RANGE.');
         amount0 = liquidity * (sqrtUpperX96 - sqrtPriceX96) * (1n << 96n) / (sqrtPriceX96 * sqrtUpperX96);
         amount1 = liquidity * (sqrtPriceX96 - sqrtLowerX96) / (1n << 96n);
     } else {
-        console.log('[DEBUG] Path Taken: Price is AT OR ABOVE upper bound.');
         amount1 = liquidity * (sqrtUpperX96 - sqrtLowerX96) / (1n << 96n);
     }
-    
-    console.log(`[DEBUG] Calculated Raw Amounts: amount0=${amount0.toString()}, amount1=${amount1.toString()}`);
-    console.log('[DEBUG] --- Exiting getAmountsFromLiquidity ---\n');
     return [amount0, amount1];
 }
-
 
 async function getTokenMeta(addr) {
     try {
@@ -349,7 +334,9 @@ async function getPositionsData(walletAddress) {
             const histWETHCurrent = await fetchHistoricalPrice('ethereum', dateStrCurrent);
             const histUSDCCurrent = await fetchHistoricalPrice('usd-coin', dateStrCurrent);
             
-            const historicalPriceOfToken0 = t0.symbol === "WETH" ? histWETHCurrent / histUSDCCurrent : histUSDCCurrent / histWETHCurrent;
+            // ++ FIX: Correctly adjust for token decimals when calculating the price from CoinGecko data.
+            const decimalAdjustment = Math.pow(10, t1.decimals - t0.decimals);
+            const historicalPriceOfToken0 = (t0.symbol === "WETH" ? histWETHCurrent / histUSDCCurrent : histUSDCCurrent / histWETHCurrent) * decimalAdjustment;
             const estimatedHistoricalTick = Math.log(historicalPriceOfToken0) / Math.log(1.0001);
             const historicalSqrtPriceX96 = tickToSqrtPriceX96(Math.round(estimatedHistoricalTick));
 
