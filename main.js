@@ -13,7 +13,7 @@ const RENDER_WEBHOOK_URL = process.env.RENDER_WEBHOOK_URL;
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 
 // --- Ethers.js Provider and Contract Addresses ---
-const provider = new ethers.JsonRpcProvider("https://base.publicnode.com");
+const provider = new ethers.JsonRpcProvider("https://base-mainnet.infura.io/v3/cceebb32fc834db39318ba89b48471a1");
 
 const managerAddress = "0x03a520b32c04bf3beef7beb72e919cf822ed34f1";
 const myAddress = "0x2FD24cC510b7a40b176B05A5Bb628d024e3B6886";
@@ -285,20 +285,16 @@ async function getFormattedPositionData(walletAddress) {
             }
             
             const pool = new ethers.Contract(dynamicPoolAddress, poolAbi, provider);
-
-            const [slot0, token0Addr, token1Addr] = await Promise.all([
-                pool.slot0(),
-                pool.token0(),
-                pool.token1()
-            ]);
+            
+            const slot0 = await pool.slot0();
+            const token0Addr = await pool.token0();
+            const token1Addr = await pool.token1();
             
             const sqrtP = slot0[0];
             const nativeTick = slot0[1];
 
-            const [t0, t1] = await Promise.all([
-                getTokenMeta(token0Addr),
-                getTokenMeta(token1Addr)
-            ]);
+            const t0 = await getTokenMeta(token0Addr);
+            const t1 = await getTokenMeta(token1Addr);
 
             const [sqrtL, sqrtU] = [
                 tickToSqrtPriceX96(Number(pos.tickLower)),
@@ -344,15 +340,14 @@ async function getFormattedPositionData(walletAddress) {
                 const histWETHCurrent = await fetchHistoricalPrice('ethereum', dateStrCurrent);
                 const histUSDCCurrent = await fetchHistoricalPrice('usd-coin', dateStrCurrent);
 
-                // ++ FIX: This is the corrected logic that avoids the "missing trie node" error ++
-                // It calculates the estimated tick from CoinGecko prices instead of making a failing on-chain call.
-                const historicalPriceOfToken0 = t0.symbol === "WETH" ? histWETHCurrent / histUSDCCurrent : histUSDCCurrent / histWETHCurrent;
-                const estimatedHistoricalTick = Math.log(historicalPriceOfToken0) / Math.log(1.0001);
-                const historicalSqrtPriceX96 = tickToSqrtPriceX96(Math.round(estimatedHistoricalTick));
+                const historicalSlot0 = await pool.slot0({ blockTag: mintBlock });
+                
+                const historicalTick = historicalSlot0.tick;
+                const historicalSqrtPriceX96 = tickToSqrtPriceX96(historicalTick);
 
                 const [histAmt0Current_raw, histAmt1Current_raw] = getAmountsFromLiquidity(
                     pos.liquidity,
-                    historicalSqrtPriceX96, // Using the new estimated historical price
+                    historicalSqrtPriceX96,
                     tickToSqrtPriceX96(Number(pos.tickLower)),
                     tickToSqrtPriceX96(Number(pos.tickUpper))
                 );
@@ -394,6 +389,14 @@ async function getFormattedPositionData(walletAddress) {
                 const sanitizedErrorMessage = (error.message || "Unknown error").replace(/[*_`[\]]/g, '');
                 currentPositionMessage += `⚠️ Could not analyze position history: ${sanitizedErrorMessage}\n`;
             }
+            
+            // ++ FIX: Moved this block up to be before the ratio is calculated and used.
+            let amtWETH = 0, amtUSDC = 0;
+            if (t0.symbol.toUpperCase() === "WETH") {
+                amtWETH = amt0; amtUSDC = amt1;
+            } else {
+                amtWETH = amt1; amtUSDC = amt0;
+            }
 
             const lowerPrice = tickToPricePerToken0(Number(pos.tickLower), Number(t0.decimals), Number(t1.decimals));
             const upperPrice = tickToPricePerToken0(Number(pos.tickUpper), Number(t0.decimals), Number(t1.decimals));
@@ -409,13 +412,6 @@ async function getFormattedPositionData(walletAddress) {
             const inRange = nativeTick >= pos.tickLower && nativeTick < pos.tickUpper;
             currentPositionMessage += `📍 In Range? ${inRange ? "✅ Yes" : "❌ No"}\n`;
             
-            let amtWETH = 0, amtUSDC = 0;
-            if (t0.symbol.toUpperCase() === "WETH") {
-                amtWETH = amt0; amtUSDC = amt1;
-            } else {
-                amtWETH = amt1; amtUSDC = amt0;
-            }
-
             const principalUSD = amtWETH * prices.WETH + amtUSDC * prices.USDC;
             totalPortfolioPrincipalUSD += principalUSD;
 
