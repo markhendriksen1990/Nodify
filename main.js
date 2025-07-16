@@ -75,8 +75,7 @@ function getAmountsFromLiquidity(liquidity, sqrtPriceX96, sqrtLowerX96, sqrtUppe
 async function getTokenMeta(addr) {
     try {
         const t = new ethers.Contract(addr, erc20Abi, provider);
-        const symbol = await t.symbol();
-        const decimals = await t.decimals();
+        const [symbol, decimals] = await Promise.all([t.symbol(), t.decimals()]);
         return { symbol, decimals, address: addr };
     } catch {
         return { symbol: "UNKNOWN", decimals: 18, address: addr };
@@ -286,16 +285,20 @@ async function getFormattedPositionData(walletAddress) {
             }
             
             const pool = new ethers.Contract(dynamicPoolAddress, poolAbi, provider);
-            
-            const slot0 = await pool.slot0();
-            const token0Addr = await pool.token0();
-            const token1Addr = await pool.token1();
+
+            const [slot0, token0Addr, token1Addr] = await Promise.all([
+                pool.slot0(),
+                pool.token0(),
+                pool.token1()
+            ]);
             
             const sqrtP = slot0[0];
             const nativeTick = slot0[1];
 
-            const t0 = await getTokenMeta(token0Addr);
-            const t1 = await getTokenMeta(token1Addr);
+            const [t0, t1] = await Promise.all([
+                getTokenMeta(token0Addr),
+                getTokenMeta(token1Addr)
+            ]);
 
             const [sqrtL, sqrtU] = [
                 tickToSqrtPriceX96(Number(pos.tickLower)),
@@ -324,12 +327,8 @@ async function getFormattedPositionData(walletAddress) {
             let currentPositionInitialPrincipalUSD = 0;
             let positionHistoryAnalysisSucceeded = false;
 
-            // ++ DEBUG: Added more detailed logging around the historical analysis block ++
-            console.log(`[DEBUG] Processing historical data for Token ID: ${tokenId.toString()}`);
             try {
                 const mintBlock = await getMintEventBlock(manager, tokenId, provider, walletAddress);
-                console.log(`[DEBUG] Found mintBlock: ${mintBlock} for token ${tokenId.toString()}`);
-
                 const startTimestampMs = await getBlockTimestamp(mintBlock);
                 currentPositionStartDate = new Date(startTimestampMs);
 
@@ -344,13 +343,12 @@ async function getFormattedPositionData(walletAddress) {
 
                 const histWETHCurrent = await fetchHistoricalPrice('ethereum', dateStrCurrent);
                 const histUSDCCurrent = await fetchHistoricalPrice('usd-coin', dateStrCurrent);
-                
-                console.log(`[DEBUG] Attempting to fetch historical slot0 for block ${mintBlock}...`);
-                const historicalSlot0 = await pool.slot0({ blockTag: mintBlock });
-                console.log(`[DEBUG] Successfully fetched historical slot0 for block ${mintBlock}.`);
-                
-                const historicalTick = historicalSlot0.tick;
-                const historicalSqrtPriceX96 = tickToSqrtPriceX96(historicalTick);
+
+                // ++ FIX: Calculate the estimated historical tick from CoinGecko prices ++
+                // This avoids the direct historical on-chain call that was failing.
+                const historicalPriceOfToken0 = t0.symbol === "WETH" ? histWETHCurrent / histUSDCCurrent : histUSDCCurrent / histWETHCurrent;
+                const estimatedHistoricalTick = Math.log(historicalPriceOfToken0) / Math.log(1.0001);
+                const historicalSqrtPriceX96 = tickToSqrtPriceX96(Math.round(estimatedHistoricalTick));
 
                 const [histAmt0Current_raw, histAmt1Current_raw] = getAmountsFromLiquidity(
                     pos.liquidity,
@@ -368,7 +366,18 @@ async function getFormattedPositionData(walletAddress) {
                     histUSDCamtCurrent = parseFloat(formatUnits(histAmt0Current_raw, t0.decimals));
                 }
                 
+                console.log(`--- Debugging Initial Investment for Token ID: ${tokenId.toString()} ---`);
+                console.log(`Mint Date: ${dateStrCurrent}`);
+                console.log(`Historical WETH Price: $${histWETHCurrent}`);
+                console.log(`Historical USDC Price: $${histUSDCCurrent}`);
+                console.log(`Calculated Historical WETH Amount: ${histWETHamtCurrent}`);
+                console.log(`Calculated Historical USDC Amount: ${histUSDCamtCurrent}`);
+
                 currentPositionInitialPrincipalUSD = histWETHamtCurrent * histWETHCurrent + histUSDCamtCurrent * histUSDCCurrent;
+                
+                console.log(`Total Initial Investment Calculated: $${currentPositionInitialPrincipalUSD.toFixed(2)}`);
+                console.log('----------------------------------------------------');
+
 
                 if (currentPositionInitialPrincipalUSD > 0) {
                     positionHistoryAnalysisSucceeded = true;
@@ -381,7 +390,6 @@ async function getFormattedPositionData(walletAddress) {
                 currentPositionMessage += `📅 Created: ${currentPositionStartDate.toISOString().replace('T', ' ').slice(0, 19)}\n`;
                 currentPositionMessage += `💰 Initial Investment: $${currentPositionInitialPrincipalUSD.toFixed(2)}\n`;
             } catch (error) {
-                // ++ DEBUG: Log the full error object for better diagnostics ++
                 console.error(`[DEBUG] ERROR during historical analysis for token ${tokenId.toString()}:`, error);
                 const sanitizedErrorMessage = (error.message || "Unknown error").replace(/[*_`[\]]/g, '');
                 currentPositionMessage += `⚠️ Could not analyze position history: ${sanitizedErrorMessage}\n`;
