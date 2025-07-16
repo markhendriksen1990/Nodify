@@ -4,11 +4,6 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 const { abi: FactoryAbi } = require('@uniswap/v3-core/artifacts/contracts/UniswapV3Factory.sol/UniswapV3Factory.json');
-// ++ NEW: Imports for image generation and sending file data ++
-const { createCanvas, loadImage, registerFont } = require('canvas');
-const FormData = require('form-data');
-const fs = require('fs');
-const path = require('path');
 
 
 // --- Configuration from Environment Variables ---
@@ -18,7 +13,7 @@ const RENDER_WEBHOOK_URL = process.env.RENDER_WEBHOOK_URL;
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 
 // --- Ethers.js Provider and Contract Addresses ---
-const provider = new ethers.JsonRpcProvider("https://base.publicnode.com");
+const provider = new ethers.JsonRpcProvider("https://base-mainnet.infura.io/v3/cceebb32fc834db39318ba89b48471a1");
 
 const managerAddress = "0x03a520b32c04bf3beef7beb72e919cf822ed34f1";
 const myAddress = "0x2FD24cC510b7a40b176B05A5Bb628d024e3B6886";
@@ -47,15 +42,6 @@ const erc20Abi = [
 
 const UINT128_MAX = "340282366920938463463374607431768211455";
 const { formatUnits } = ethers;
-
-// ++ NEW: Register the font for use in the canvas ++
-// Ensure you have a 'Roboto-Regular.ttf' file in your project directory
-if (fs.existsSync('Roboto-Regular.ttf')) {
-    registerFont('Roboto-Regular.ttf', { family: 'Roboto' });
-} else {
-    console.warn("Font file 'Roboto-Regular.ttf' not found. Text in snapshots may not render correctly.");
-}
-
 
 // --- Utility Functions ---
 
@@ -300,15 +286,19 @@ async function getFormattedPositionData(walletAddress) {
             
             const pool = new ethers.Contract(dynamicPoolAddress, poolAbi, provider);
 
-            const slot0 = await pool.slot0();
-            const token0Addr = await pool.token0();
-            const token1Addr = await pool.token1();
+            const [slot0, token0Addr, token1Addr] = await Promise.all([
+                pool.slot0(),
+                pool.token0(),
+                pool.token1()
+            ]);
             
             const sqrtP = slot0[0];
             const nativeTick = slot0[1];
 
-            const t0 = await getTokenMeta(token0Addr);
-            const t1 = await getTokenMeta(token1Addr);
+            const [t0, t1] = await Promise.all([
+                getTokenMeta(token0Addr),
+                getTokenMeta(token1Addr)
+            ]);
 
             const [sqrtL, sqrtU] = [
                 tickToSqrtPriceX96(Number(pos.tickLower)),
@@ -353,19 +343,10 @@ async function getFormattedPositionData(walletAddress) {
 
                 const histWETHCurrent = await fetchHistoricalPrice('ethereum', dateStrCurrent);
                 const histUSDCCurrent = await fetchHistoricalPrice('usd-coin', dateStrCurrent);
-                
-                const historicalSlot0 = await pool.slot0({ blockTag: mintBlock });
-                
-                const historicalTick = historicalSlot0.tick;
-                const historicalSqrtPriceX96 = tickToSqrtPriceX96(historicalTick);
 
                 const [histAmt0Current_raw, histAmt1Current_raw] = getAmountsFromLiquidity(
-                    pos.liquidity,
-                    historicalSqrtPriceX96,
-                    tickToSqrtPriceX96(Number(pos.tickLower)),
-                    tickToSqrtPriceX96(Number(pos.tickUpper))
+                    pos.liquidity, tickToSqrtPriceX96(Number(pos.tickLower)), tickToSqrtPriceX96(Number(pos.tickLower)), tickToSqrtPriceX96(Number(pos.tickUpper))
                 );
-
                 let histWETHamtCurrent = 0, histUSDCamtCurrent = 0;
                 if (t0.symbol.toUpperCase() === "WETH") {
                     histWETHamtCurrent = parseFloat(formatUnits(histAmt0Current_raw, t0.decimals));
@@ -375,6 +356,7 @@ async function getFormattedPositionData(walletAddress) {
                     histUSDCamtCurrent = parseFloat(formatUnits(histAmt0Current_raw, t0.decimals));
                 }
                 
+                // ++ NEW: Added log lines for debugging ++
                 console.log(`--- Debugging Initial Investment for Token ID: ${tokenId.toString()} ---`);
                 console.log(`Mint Date: ${dateStrCurrent}`);
                 console.log(`Historical WETH Price: $${histWETHCurrent}`);
@@ -399,21 +381,16 @@ async function getFormattedPositionData(walletAddress) {
                 currentPositionMessage += `📅 Created: ${currentPositionStartDate.toISOString().replace('T', ' ').slice(0, 19)}\n`;
                 currentPositionMessage += `💰 Initial Investment: $${currentPositionInitialPrincipalUSD.toFixed(2)}\n`;
             } catch (error) {
-                console.error(`[DEBUG] ERROR during historical analysis for token ${tokenId.toString()}:`, error);
-                const sanitizedErrorMessage = (error.message || "Unknown error").replace(/[*_`[\]]/g, '');
-                currentPositionMessage += `⚠️ Could not analyze position history: ${sanitizedErrorMessage}\n`;
+                currentPositionMessage += `⚠️ Could not analyze position history: ${error.message}\n`;
             }
 
             const lowerPrice = tickToPricePerToken0(Number(pos.tickLower), Number(t0.decimals), Number(t1.decimals));
             const upperPrice = tickToPricePerToken0(Number(pos.tickUpper), Number(t0.decimals), Number(t1.decimals));
             const currentPrice = tickToPricePerToken0(Number(nativeTick), Number(t0.decimals), Number(t1.decimals));
 
-            const ratio = getRatio(amtWETH * prices.WETH, amtUSDC * prices.USDC);
-
             currentPositionMessage += `\n*Price Information*\n`;
             currentPositionMessage += `Range: $${lowerPrice.toFixed(2)} - $${upperPrice.toFixed(2)} ${t1.symbol}/${t0.symbol}\n`;
-            currentPositionMessage += `Current Price: $${currentPrice.toFixed(2)} ${t1.symbol}/${t0.symbol}\n`;
-            currentPositionMessage += `Ratio: WETH/USDC ${ratio.weth}/${ratio.usdc}%\n`;
+            currentPositionMessage += `🌐 Current Price: $${currentPrice.toFixed(2)} ${t1.symbol}/${t0.symbol}\n`;
 
             const inRange = nativeTick >= pos.tickLower && nativeTick < pos.tickUpper;
             currentPositionMessage += `📍 In Range? ${inRange ? "✅ Yes" : "❌ No"}\n`;
@@ -427,10 +404,13 @@ async function getFormattedPositionData(walletAddress) {
 
             const principalUSD = amtWETH * prices.WETH + amtUSDC * prices.USDC;
             totalPortfolioPrincipalUSD += principalUSD;
-            
+
+            const ratio = getRatio(amtWETH * prices.WETH, amtUSDC * prices.USDC);
+
             currentPositionMessage += `\n*Current Holdings*\n`;
             currentPositionMessage += `🏛 ${formatTokenAmount(amtWETH, 6)} WETH ($${(amtWETH * prices.WETH).toFixed(2)})\n`;
             currentPositionMessage += `🏛 ${formatTokenAmount(amtUSDC, 2)} USDC ($${(amtUSDC * prices.USDC).toFixed(2)})\n`;
+            currentPositionMessage += `🏛 Ratio: WETH/USDC ${ratio.weth}/${ratio.usdc}%\n`;
             currentPositionMessage += `🏛 Holdings: *$${principalUSD.toFixed(2)}*\n`;
 
             const positionHoldingsChange = principalUSD - currentPositionInitialPrincipalUSD;
@@ -457,11 +437,11 @@ async function getFormattedPositionData(walletAddress) {
                 const feesAPR = (rewardsPerYear / currentPositionInitialPrincipalUSD) * 100;
 
                 currentPositionMessage += `\n*Fee Performance*\n`;
-                currentPositionMessage += `💧 Fees per hour: $${rewardsPerHour.toFixed(2)}\n`;
-                currentPositionMessage += `💧 Fees per day: $${rewardsPerDay.toFixed(2)}\n`;
-                currentPositionMessage += `💧 Fees per month: $${rewardsPerMonth.toFixed(2)}\n`;
-                currentPositionMessage += `💧 Fees per year: $${rewardsPerYear.toFixed(2)}\n`;
-                currentPositionMessage += `💧 Fees APR: ${feesAPR.toFixed(2)}%\n`;
+                currentPositionMessage += `💰 Fees per hour: $${rewardsPerHour.toFixed(2)}\n`;
+                currentPositionMessage += `💰 Fees per day: $${rewardsPerDay.toFixed(2)}\n`;
+                currentPositionMessage += `💰 Fees per month: $${rewardsPerMonth.toFixed(2)}\n`;
+                currentPositionMessage += `💰 Fees per year: $${rewardsPerYear.toFixed(2)}\n`;
+                currentPositionMessage += `💰 Fees APR: ${feesAPR.toFixed(2)}%\n`;
             } else {
                 currentPositionMessage += `\n⚠️ Could not determine per-position fee performance (initial investment unknown or zero).\n`;
             }
@@ -512,8 +492,7 @@ async function getFormattedPositionData(walletAddress) {
 
     } catch (error) {
         console.error("Error in getFormattedPositionData:", error);
-        const sanitizedErrorMessage = (error.message || "Unknown error").replace(/[*_`[\]]/g, '');
-        responseMessage = `An error occurred while fetching liquidity positions: ${sanitizedErrorMessage}. Please try again later.`;
+        responseMessage = `An error occurred while fetching liquidity positions: ${error.message}. Please try again later.`;
     }
     return responseMessage;
 }
