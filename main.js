@@ -174,7 +174,8 @@ async function getMintEventBlock(manager, tokenId, provider, ownerAddress) {
     ownerAddress = ownerAddress.toLowerCase();
 
     while (toBlock >= 0) {
-        let fromBlock = toBlock - INITIAL_RPC_QUERY_WINDOW;
+        let currentQueryWindow = INITIAL_RPC_QUERY_WINDOW;
+        let fromBlock = toBlock - currentQueryWindow;
         if (fromBlock < 0) {
             fromBlock = 0;
         }
@@ -187,30 +188,30 @@ async function getMintEventBlock(manager, tokenId, provider, ownerAddress) {
                 const events = await manager.queryFilter(filter, fromBlock, toBlock);
                 const mint = events.find(e => e.args && e.args.to.toLowerCase() === ownerAddress);
                 if (mint) {
-                    return mint.blockNumber; // Found it, exit the function
+                    return mint.blockNumber;
                 }
-                success = true; // Query succeeded, even if mint not in this range
-                break; // Exit retry loop
+                success = true;
+                break;
             } catch (e) {
                 const errorMessage = e.message || "";
                 if (errorMessage.includes("invalid block range") || errorMessage.includes("block range is too wide")) {
-                    const newWindow = Math.floor((toBlock - fromBlock) / 2);
-                    fromBlock = toBlock - newWindow;
-                    console.warn(`Attempt ${attempt} failed for tokenId ${tokenId}: Block range too large. Retrying with smaller window: ${newWindow} blocks.`);
-                    await new Promise(res => setTimeout(res, 1000 * attempt)); // Wait longer on each retry
+                    currentQueryWindow = Math.floor(currentQueryWindow / 2);
+                    fromBlock = toBlock - currentQueryWindow;
+                    if(fromBlock < 0) fromBlock = 0;
+                    console.warn(`Attempt ${attempt} failed for tokenId ${tokenId}: Block range too large. Retrying with smaller window: ${currentQueryWindow} blocks.`);
+                    await new Promise(res => setTimeout(res, 1000 * attempt));
                 } else {
-                     // Non-retriable error
                     console.error(`Unrecoverable error querying logs for tokenId ${tokenId}:`, e);
-                    throw e; // Or break to continue scanning
+                    throw e;
                 }
             }
         }
 
         if (!success) {
-            console.error(`All ${maxRetries} retry attempts failed for block range ${fromBlock}-${toBlock} on tokenId ${tokenId}. Skipping this range.`);
+            console.error(`All ${maxRetries} retry attempts failed for block range ending at ${toBlock} on tokenId ${tokenId}. Skipping this chunk.`);
         }
 
-        toBlock = fromBlock - 1;
+        toBlock = toBlock - INITIAL_RPC_QUERY_WINDOW - 1;
     }
 
     throw new Error(`Mint event not found for tokenId ${tokenId} after scanning all blocks.`);
