@@ -385,7 +385,6 @@ async function getFormattedPositionData(walletAddress) {
 
         for (const data of allPositionsData) {
             let currentPositionMessage = "";
-            // ++ CHANGE: Updated position header format ++
             currentPositionMessage += `\n-------------- Position #${data.i.toString()} --------------\n`;
             currentPositionMessage += `🔹 Token ID: \`${data.tokenId.toString()}\`\n`;
             currentPositionMessage += `🔸 Pool: ${data.t0.symbol}/${data.t1.symbol} (${Number(data.pos.fee)/10000}% fee)\n`;
@@ -487,7 +486,6 @@ async function getFormattedPositionData(walletAddress) {
             const totalReturnPercent = (totalReturn / overallData.startPrincipalUSD) * 100;
             const feesAPR = (rewardsPerYear / overallData.startPrincipalUSD) * 100;
 
-            // ++ CHANGE: Updated overall performance header format ++
             responseMessage += `\n====== OVERALL PERFORMANCE ======\n`;
             responseMessage += `(Based on the *${positionMessages.length}* displayed position(s))\n`;
             responseMessage += `🏛 Initial Investment: $${overallData.startPrincipalUSD.toFixed(2)}\n`;
@@ -541,9 +539,13 @@ async function generateSnapshotImage(data) {
 
 
     ctx.fillStyle = '#FFFFFF';
-    ctx.font = '36px Roboto';
     ctx.textAlign = 'center';
-    ctx.fillText(`${data.timestamp} - ${data.pair} ${data.feeTier}`, width / 2, 270);
+    
+    // ++ CHANGE: Header text is now split into two lines with different sizes ++
+    ctx.font = '40px Roboto';
+    ctx.fillText(`${data.pair} ${data.feeTier}`, width / 2, 260);
+    ctx.font = '30px Roboto';
+    ctx.fillText(`${data.timestamp}`, width / 2, 300);
 
     ctx.font = '32px Roboto';
     ctx.textAlign = 'left';
@@ -559,19 +561,19 @@ async function generateSnapshotImage(data) {
     
     const holdingsChangeColor = data.holdingsChange.startsWith('-') ? '#FF6B6B' : '#63FF84';
 
-    drawLine("Current Value:", data.currentValue, 350);
+    drawLine("Current Value:", data.currentValue, 380);
     
     ctx.fillStyle = '#cccccc';
-    ctx.fillText("Holdings Change:", 70, 410);
+    ctx.fillText("Holdings Change:", 70, 440);
     ctx.fillStyle = holdingsChangeColor;
     ctx.textAlign = 'right';
-    ctx.fillText(data.holdingsChange, width - 70, 410);
+    ctx.fillText(data.holdingsChange, width - 70, 440);
     ctx.textAlign = 'left';
 
-    drawLine(`Uncollected ${data.t0Symbol}:`, data.fees0, 500);
-    drawLine(`Uncollected ${data.t1Symbol}:`, data.fees1, 560);
-    drawLine("Total Fees:", data.totalFees, 620);
-    drawLine("Fees APR:", data.feesAPR, 680);
+    drawLine(`Uncollected ${data.t0Symbol}:`, data.fees0, 530);
+    drawLine(`Uncollected ${data.t1Symbol}:`, data.fees1, 590);
+    drawLine("Total Fees:", data.totalFees, 650);
+    drawLine("Fees APR:", data.feesAPR, 710);
 
     return canvas.toBuffer('image/png');
 }
@@ -605,7 +607,7 @@ async function handleSnapshotCommand(chatId) {
                  const rewardsPerYear = elapsedMs > 0 ? totalPositionFeesUSD * (365.25 * 24 * 60 * 60 * 1000) / elapsedMs : 0;
                  feesAPR = `${((rewardsPerYear / data.currentPositionInitialPrincipalUSD) * 100).toFixed(2)}%`;
                  const adjustedDate = new Date(data.currentPositionStartDate.getTime() + (2 * 60 * 60 * 1000));
-                 timestamp = adjustedDate.toISOString().replace('T', ' ').slice(0, 19);
+                 timestamp = adjustedDate.toISOString().replace('T', ' ').slice(0, 16);
             }
 
             const snapshotData = {
