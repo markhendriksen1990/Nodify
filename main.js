@@ -286,6 +286,8 @@ async function getFormattedPositionData(walletAddress) {
             
             const pool = new ethers.Contract(dynamicPoolAddress, poolAbi, provider);
 
+            const historicalSlot0ForInvestment = await pool.slot0({ blockTag: await getMintEventBlock(manager, tokenId, provider, walletAddress) });
+
             const [slot0, token0Addr, token1Addr] = await Promise.all([
                 pool.slot0(),
                 pool.token0(),
@@ -343,12 +345,9 @@ async function getFormattedPositionData(walletAddress) {
 
                 const histWETHCurrent = await fetchHistoricalPrice('ethereum', dateStrCurrent);
                 const histUSDCCurrent = await fetchHistoricalPrice('usd-coin', dateStrCurrent);
-
-                // ++ FIX: Calculate the estimated historical tick from CoinGecko prices ++
-                // This avoids the direct historical on-chain call that was failing.
-                const historicalPriceOfToken0 = t0.symbol === "WETH" ? histWETHCurrent / histUSDCCurrent : histUSDCCurrent / histWETHCurrent;
-                const estimatedHistoricalTick = Math.log(historicalPriceOfToken0) / Math.log(1.0001);
-                const historicalSqrtPriceX96 = tickToSqrtPriceX96(Math.round(estimatedHistoricalTick));
+                
+                const historicalTick = historicalSlot0ForInvestment.tick;
+                const historicalSqrtPriceX96 = tickToSqrtPriceX96(historicalTick);
 
                 const [histAmt0Current_raw, histAmt1Current_raw] = getAmountsFromLiquidity(
                     pos.liquidity,
@@ -399,9 +398,13 @@ async function getFormattedPositionData(walletAddress) {
             const upperPrice = tickToPricePerToken0(Number(pos.tickUpper), Number(t0.decimals), Number(t1.decimals));
             const currentPrice = tickToPricePerToken0(Number(nativeTick), Number(t0.decimals), Number(t1.decimals));
 
+            const ratio = getRatio(amtWETH * prices.WETH, amtUSDC * prices.USDC);
+
             currentPositionMessage += `\n*Price Information*\n`;
             currentPositionMessage += `Range: $${lowerPrice.toFixed(2)} - $${upperPrice.toFixed(2)} ${t1.symbol}/${t0.symbol}\n`;
-            currentPositionMessage += `🌐 Current Price: $${currentPrice.toFixed(2)} ${t1.symbol}/${t0.symbol}\n`;
+            // ++ CHANGE: Icon removed and Ratio line moved here ++
+            currentPositionMessage += `Current Price: $${currentPrice.toFixed(2)} ${t1.symbol}/${t0.symbol}\n`;
+            currentPositionMessage += `Ratio: WETH/USDC ${ratio.weth}/${ratio.usdc}%\n`;
 
             const inRange = nativeTick >= pos.tickLower && nativeTick < pos.tickUpper;
             currentPositionMessage += `📍 In Range? ${inRange ? "✅ Yes" : "❌ No"}\n`;
@@ -416,12 +419,9 @@ async function getFormattedPositionData(walletAddress) {
             const principalUSD = amtWETH * prices.WETH + amtUSDC * prices.USDC;
             totalPortfolioPrincipalUSD += principalUSD;
 
-            const ratio = getRatio(amtWETH * prices.WETH, amtUSDC * prices.USDC);
-
             currentPositionMessage += `\n*Current Holdings*\n`;
             currentPositionMessage += `🏛 ${formatTokenAmount(amtWETH, 6)} WETH ($${(amtWETH * prices.WETH).toFixed(2)})\n`;
             currentPositionMessage += `🏛 ${formatTokenAmount(amtUSDC, 2)} USDC ($${(amtUSDC * prices.USDC).toFixed(2)})\n`;
-            currentPositionMessage += `🏛 Ratio: WETH/USDC ${ratio.weth}/${ratio.usdc}%\n`;
             currentPositionMessage += `🏛 Holdings: *$${principalUSD.toFixed(2)}*\n`;
 
             const positionHoldingsChange = principalUSD - currentPositionInitialPrincipalUSD;
@@ -448,11 +448,12 @@ async function getFormattedPositionData(walletAddress) {
                 const feesAPR = (rewardsPerYear / currentPositionInitialPrincipalUSD) * 100;
 
                 currentPositionMessage += `\n*Fee Performance*\n`;
-                currentPositionMessage += `💰 Fees per hour: $${rewardsPerHour.toFixed(2)}\n`;
-                currentPositionMessage += `💰 Fees per day: $${rewardsPerDay.toFixed(2)}\n`;
-                currentPositionMessage += `💰 Fees per month: $${rewardsPerMonth.toFixed(2)}\n`;
-                currentPositionMessage += `💰 Fees per year: $${rewardsPerYear.toFixed(2)}\n`;
-                currentPositionMessage += `💰 Fees APR: ${feesAPR.toFixed(2)}%\n`;
+                // ++ CHANGE: Icons changed to water drops ++
+                currentPositionMessage += `💧 Fees per hour: $${rewardsPerHour.toFixed(2)}\n`;
+                currentPositionMessage += `💧 Fees per day: $${rewardsPerDay.toFixed(2)}\n`;
+                currentPositionMessage += `💧 Fees per month: $${rewardsPerMonth.toFixed(2)}\n`;
+                currentPositionMessage += `💧 Fees per year: $${rewardsPerYear.toFixed(2)}\n`;
+                currentPositionMessage += `💧 Fees APR: ${feesAPR.toFixed(2)}%\n`;
             } else {
                 currentPositionMessage += `\n⚠️ Could not determine per-position fee performance (initial investment unknown or zero).\n`;
             }
