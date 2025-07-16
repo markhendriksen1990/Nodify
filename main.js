@@ -318,33 +318,42 @@ async function getPositionsData(walletAddress) {
         const positionDataObject = { i, tokenId, t0, t1, pos, nativeTick, amt0, amt1, fee0, fee1, prices, sqrtL, sqrtU };
 
         try {
-            // ++ FIX: Pass the walletAddress to the function that needs it ++
+            // ++ DEBUG: Added more detailed logging around the entire historical analysis block ++
+            console.log(`\n[INVESTMENT-DEBUG] --- Starting Historical Analysis for Token ID: ${tokenId.toString()} ---`);
+
             const mintBlock = await getMintEventBlock(manager, tokenId, provider, walletAddress);
+            console.log(`[INVESTMENT-DEBUG] 1. Mint Block: ${mintBlock}`);
             
             const startTimestampMs = await getBlockTimestamp(mintBlock);
             positionDataObject.currentPositionStartDate = new Date(startTimestampMs);
-
-            if (!positionDataObject.startDate || positionDataObject.currentPositionStartDate.getTime() < positionDataObject.startDate.getTime()) {
-                positionDataObject.startDate = positionDataObject.currentPositionStartDate;
-            }
-
+            console.log(`[INVESTMENT-DEBUG] 2. Mint Timestamp: ${positionDataObject.currentPositionStartDate.toISOString()}`);
+            
             const dayCurrent = positionDataObject.currentPositionStartDate.getDate().toString().padStart(2, '0');
             const monthCurrent = (positionDataObject.currentPositionStartDate.getMonth() + 1).toString().padStart(2, '0');
             const yearCurrent = positionDataObject.currentPositionStartDate.getFullYear();
             const dateStrCurrent = `${dayCurrent}-${monthCurrent}-${yearCurrent}`;
-            
+
             const histWETHCurrent = await fetchHistoricalPrice('ethereum', dateStrCurrent);
             const histUSDCCurrent = await fetchHistoricalPrice('usd-coin', dateStrCurrent);
-            
-            const historicalPriceOfToken0 = t0.symbol === "WETH" ? histWETHCurrent / histUSDCCurrent : histUSDCCurrent / histWETHCurrent;
-            const estimatedHistoricalTick = Math.log(historicalPriceOfToken0) / Math.log(1.0001);
+            console.log(`[INVESTMENT-DEBUG] 3. CoinGecko Prices (Date: ${dateStrCurrent}): WETH=$${histWETHCurrent}, USDC=$${histUSDCCurrent}`);
 
-            // ++ FIX: Explicitly convert the BigInt tick to a Number before passing it to the math function ++
+            console.log(`[INVESTMENT-DEBUG] 4. Token Decimals: ${t0.symbol}=${t0.decimals}, ${t1.symbol}=${t1.decimals}`);
+            const decimalAdjustment = Math.pow(10, t1.decimals - t0.decimals);
+            console.log(`[INVESTMENT-DEBUG] 5. Decimal Adjustment: ${decimalAdjustment}`);
+            
+            const historicalPriceOfToken0 = (t0.symbol === "WETH" ? histWETHCurrent / histUSDCCurrent : histUSDCCurrent / histWETHCurrent) * decimalAdjustment;
+            console.log(`[INVESTMENT-DEBUG] 6. Calculated Historical Price (Token0/Token1): ${historicalPriceOfToken0}`);
+
+            const estimatedHistoricalTick = Math.log(historicalPriceOfToken0) / Math.log(1.0001);
+            console.log(`[INVESTMENT-DEBUG] 7. Estimated Historical Tick: ${Math.round(estimatedHistoricalTick)}`);
+
             const historicalSqrtPriceX96 = tickToSqrtPriceX96(Number(estimatedHistoricalTick));
+            console.log(`[INVESTMENT-DEBUG] 8. Estimated Historical SqrtPriceX96: ${historicalSqrtPriceX96.toString()}`);
 
             const [histAmt0Current_raw, histAmt1Current_raw] = getAmountsFromLiquidity(
                 pos.liquidity, historicalSqrtPriceX96, sqrtL, sqrtU
             );
+            console.log(`[INVESTMENT-DEBUG] 9. Raw Initial Amounts from Liquidity: Amount0=${histAmt0Current_raw.toString()}, Amount1=${histAmt1Current_raw.toString()}`);
 
             if (t0.symbol.toUpperCase() === "WETH") {
                 positionDataObject.histWETHamtCurrent = parseFloat(formatUnits(histAmt0Current_raw, t0.decimals));
@@ -353,9 +362,12 @@ async function getPositionsData(walletAddress) {
                 positionDataObject.histWETHamtCurrent = parseFloat(formatUnits(histAmt1Current_raw, t1.decimals));
                 positionDataObject.histUSDCamtCurrent = parseFloat(formatUnits(histAmt0Current_raw, t0.decimals));
             }
+            console.log(`[INVESTMENT-DEBUG] 10. Parsed Initial Amounts: WETH=${positionDataObject.histWETHamtCurrent.toFixed(18)}, USDC=${positionDataObject.histUSDCamtCurrent.toFixed(18)}`);
             
             positionDataObject.currentPositionInitialPrincipalUSD = positionDataObject.histWETHamtCurrent * histWETHCurrent + positionDataObject.histUSDCamtCurrent * histUSDCCurrent;
             positionDataObject.positionHistoryAnalysisSucceeded = positionDataObject.currentPositionInitialPrincipalUSD > 0;
+            console.log(`[INVESTMENT-DEBUG] 11. Final Calculated Initial Investment: $${positionDataObject.currentPositionInitialPrincipalUSD.toFixed(2)}`);
+            console.log(`[INVESTMENT-DEBUG] --- End Historical Analysis for Token ID: ${tokenId.toString()} ---\n`);
 
         } catch (error) {
             console.error(`[DEBUG] ERROR during historical analysis for token ${tokenId.toString()}:`, error);
