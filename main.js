@@ -395,7 +395,13 @@ async function getFormattedPositionData(walletAddress) {
                     overallData.startPrincipalUSD = data.currentPositionInitialPrincipalUSD;
                 }
                 const adjustedDate = new Date(data.currentPositionStartDate.getTime() + (2 * 60 * 60 * 1000));
-                currentPositionMessage += `📅 Created: ${adjustedDate.toISOString().replace('T', ' ').slice(0, 19)}\n`;
+                const day = adjustedDate.getDate().toString().padStart(2, '0');
+                const month = (adjustedDate.getMonth() + 1).toString().padStart(2, '0');
+                const year = adjustedDate.getFullYear();
+                const hours = adjustedDate.getHours().toString().padStart(2, '0');
+                const minutes = adjustedDate.getMinutes().toString().padStart(2, '0');
+                
+                currentPositionMessage += `📅 Created: ${day}-${month}-${year} ${hours}:${minutes}\n`;
                 currentPositionMessage += `💰 Initial Investment: $${data.currentPositionInitialPrincipalUSD.toFixed(2)}\n`;
             } else {
                 const sanitizedErrorMessage = (data.historyError?.message || "Unknown error").replace(/[*_`[\]]/g, '');
@@ -541,7 +547,6 @@ async function generateSnapshotImage(data) {
     ctx.fillStyle = '#FFFFFF';
     ctx.textAlign = 'center';
     
-    // ++ CHANGE: Header text is now split into two lines with different sizes ++
     ctx.font = '40px Roboto';
     ctx.fillText(`${data.pair} ${data.feeTier}`, width / 2, 260);
     ctx.font = '30px Roboto';
@@ -607,7 +612,12 @@ async function handleSnapshotCommand(chatId) {
                  const rewardsPerYear = elapsedMs > 0 ? totalPositionFeesUSD * (365.25 * 24 * 60 * 60 * 1000) / elapsedMs : 0;
                  feesAPR = `${((rewardsPerYear / data.currentPositionInitialPrincipalUSD) * 100).toFixed(2)}%`;
                  const adjustedDate = new Date(data.currentPositionStartDate.getTime() + (2 * 60 * 60 * 1000));
-                 timestamp = adjustedDate.toISOString().replace('T', ' ').slice(0, 16);
+                 const day = adjustedDate.getDate().toString().padStart(2, '0');
+                 const month = (adjustedDate.getMonth() + 1).toString().padStart(2, '0');
+                 const year = adjustedDate.getFullYear();
+                 const hours = adjustedDate.getHours().toString().padStart(2, '0');
+                 const minutes = adjustedDate.getMinutes().toString().padStart(2, '0');
+                 timestamp = `${day}-${month}-${year} ${hours}:${minutes}`;
             }
 
             const snapshotData = {
