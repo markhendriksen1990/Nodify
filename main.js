@@ -1,4 +1,3 @@
-
 // --- Import necessary modules ---
 const { ethers } = require("ethers");
 const express = require('express');
@@ -287,19 +286,17 @@ async function getFormattedPositionData(walletAddress) {
             
             const pool = new ethers.Contract(dynamicPoolAddress, poolAbi, provider);
 
-            const [slot0, token0Addr, token1Addr] = await Promise.all([
-                pool.slot0(),
-                pool.token0(),
-                pool.token1()
-            ]);
+            // ++ FIX: Changed Promise.all to sequential calls to avoid rate-limiting ++
+            const slot0 = await pool.slot0();
+            const token0Addr = await pool.token0();
+            const token1Addr = await pool.token1();
             
             const sqrtP = slot0[0];
             const nativeTick = slot0[1];
 
-            const [t0, t1] = await Promise.all([
-                getTokenMeta(token0Addr),
-                getTokenMeta(token1Addr)
-            ]);
+            // ++ FIX: Changed Promise.all to sequential calls to avoid rate-limiting ++
+            const t0 = await getTokenMeta(token0Addr);
+            const t1 = await getTokenMeta(token1Addr);
 
             const [sqrtL, sqrtU] = [
                 tickToSqrtPriceX96(Number(pos.tickLower)),
@@ -344,10 +341,32 @@ async function getFormattedPositionData(walletAddress) {
 
                 const histWETHCurrent = await fetchHistoricalPrice('ethereum', dateStrCurrent);
                 const histUSDCCurrent = await fetchHistoricalPrice('usd-coin', dateStrCurrent);
+                
+                let historicalSlot0 = null;
+                const maxSlot0Retries = 3;
+                for (let slotAttempt = 1; slotAttempt <= maxSlot0Retries; slotAttempt++) {
+                    try {
+                        historicalSlot0 = await pool.slot0({ blockTag: mintBlock });
+                        break; 
+                    } catch (e) {
+                        console.warn(`Attempt ${slotAttempt} to fetch historical slot0 for block ${mintBlock} failed. Retrying...`);
+                        if (slotAttempt === maxSlot0Retries) {
+                            throw e; 
+                        }
+                        await new Promise(res => setTimeout(res, 500 * slotAttempt));
+                    }
+                }
+                
+                const historicalTick = historicalSlot0.tick;
+                const historicalSqrtPriceX96 = tickToSqrtPriceX96(historicalTick);
 
                 const [histAmt0Current_raw, histAmt1Current_raw] = getAmountsFromLiquidity(
-                    pos.liquidity, tickToSqrtPriceX96(Number(pos.tickLower)), tickToSqrtPriceX96(Number(pos.tickLower)), tickToSqrtPriceX96(Number(pos.tickUpper))
+                    pos.liquidity,
+                    historicalSqrtPriceX96,
+                    tickToSqrtPriceX96(Number(pos.tickLower)),
+                    tickToSqrtPriceX96(Number(pos.tickUpper))
                 );
+
                 let histWETHamtCurrent = 0, histUSDCamtCurrent = 0;
                 if (t0.symbol.toUpperCase() === "WETH") {
                     histWETHamtCurrent = parseFloat(formatUnits(histAmt0Current_raw, t0.decimals));
@@ -357,7 +376,6 @@ async function getFormattedPositionData(walletAddress) {
                     histUSDCamtCurrent = parseFloat(formatUnits(histAmt0Current_raw, t0.decimals));
                 }
                 
-                // ++ NEW: Added log lines for debugging ++
                 console.log(`--- Debugging Initial Investment for Token ID: ${tokenId.toString()} ---`);
                 console.log(`Mint Date: ${dateStrCurrent}`);
                 console.log(`Historical WETH Price: $${histWETHCurrent}`);
@@ -382,7 +400,8 @@ async function getFormattedPositionData(walletAddress) {
                 currentPositionMessage += `📅 Created: ${currentPositionStartDate.toISOString().replace('T', ' ').slice(0, 19)}\n`;
                 currentPositionMessage += `💰 Initial Investment: $${currentPositionInitialPrincipalUSD.toFixed(2)}\n`;
             } catch (error) {
-                currentPositionMessage += `⚠️ Could not analyze position history: ${error.message}\n`;
+                const sanitizedErrorMessage = (error.message || "Unknown error").replace(/[*_`[\]]/g, '');
+                currentPositionMessage += `⚠️ Could not analyze position history: ${sanitizedErrorMessage}\n`;
             }
 
             const lowerPrice = tickToPricePerToken0(Number(pos.tickLower), Number(t0.decimals), Number(t1.decimals));
@@ -493,7 +512,8 @@ async function getFormattedPositionData(walletAddress) {
 
     } catch (error) {
         console.error("Error in getFormattedPositionData:", error);
-        responseMessage = `An error occurred while fetching liquidity positions: ${error.message}. Please try again later.`;
+        const sanitizedErrorMessage = (error.message || "Unknown error").replace(/[*_`[\]]/g, '');
+        responseMessage = `An error occurred while fetching liquidity positions: ${sanitizedErrorMessage}. Please try again later.`;
     }
     return responseMessage;
 }
