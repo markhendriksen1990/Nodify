@@ -286,17 +286,19 @@ async function getFormattedPositionData(walletAddress) {
             
             const pool = new ethers.Contract(dynamicPoolAddress, poolAbi, provider);
 
-            // ++ FIX: Changed Promise.all to sequential calls to avoid rate-limiting ++
-            const slot0 = await pool.slot0();
-            const token0Addr = await pool.token0();
-            const token1Addr = await pool.token1();
+            const [slot0, token0Addr, token1Addr] = await Promise.all([
+                pool.slot0(),
+                pool.token0(),
+                pool.token1()
+            ]);
             
             const sqrtP = slot0[0];
             const nativeTick = slot0[1];
 
-            // ++ FIX: Changed Promise.all to sequential calls to avoid rate-limiting ++
-            const t0 = await getTokenMeta(token0Addr);
-            const t1 = await getTokenMeta(token1Addr);
+            const [t0, t1] = await Promise.all([
+                getTokenMeta(token0Addr),
+                getTokenMeta(token1Addr)
+            ]);
 
             const [sqrtL, sqrtU] = [
                 tickToSqrtPriceX96(Number(pos.tickLower)),
@@ -341,31 +343,21 @@ async function getFormattedPositionData(walletAddress) {
 
                 const histWETHCurrent = await fetchHistoricalPrice('ethereum', dateStrCurrent);
                 const histUSDCCurrent = await fetchHistoricalPrice('usd-coin', dateStrCurrent);
-                
-                let historicalSlot0 = null;
-                const maxSlot0Retries = 3;
-                for (let slotAttempt = 1; slotAttempt <= maxSlot0Retries; slotAttempt++) {
-                    try {
-                        historicalSlot0 = await pool.slot0({ blockTag: mintBlock });
-                        break; 
-                    } catch (e) {
-                        console.warn(`Attempt ${slotAttempt} to fetch historical slot0 for block ${mintBlock} failed. Retrying...`);
-                        if (slotAttempt === maxSlot0Retries) {
-                            throw e; 
-                        }
-                        await new Promise(res => setTimeout(res, 500 * slotAttempt));
-                    }
-                }
-                
+
+                // ++ FIX: The following block is the corrected logic for initial investment. ++
+                // Get the historical state of the pool at the mint block to find the price at that time.
+                const historicalSlot0 = await pool.slot0({ blockTag: mintBlock });
                 const historicalTick = historicalSlot0.tick;
                 const historicalSqrtPriceX96 = tickToSqrtPriceX96(historicalTick);
 
+                // Use the correct historical price to get an accurate estimation of initial token amounts.
                 const [histAmt0Current_raw, histAmt1Current_raw] = getAmountsFromLiquidity(
                     pos.liquidity,
-                    historicalSqrtPriceX96,
+                    historicalSqrtPriceX96, // Use the actual price at the time of minting
                     tickToSqrtPriceX96(Number(pos.tickLower)),
                     tickToSqrtPriceX96(Number(pos.tickUpper))
                 );
+                // ++ END OF FIX ++
 
                 let histWETHamtCurrent = 0, histUSDCamtCurrent = 0;
                 if (t0.symbol.toUpperCase() === "WETH") {
@@ -502,7 +494,7 @@ async function getFormattedPositionData(walletAddress) {
 
             responseMessage += `\n*Fee Performance*\n`;
             responseMessage += `💰 Total Fees Earned: $${totalFeeUSD.toFixed(2)}\n`;
-            responseMessage += `💰 Fees APR: ${feesAPR.toFixed(2)}%\n`;
+            responseMessage += `💰 Fees APR: ${feesAPR.toFixed(2)}%\\n`;
 
             const allTimeGains = totalReturn + totalFeeUSD;
             responseMessage += `\n📈 Total return + Fees: $${allTimeGains.toFixed(2)}\n`;
