@@ -13,7 +13,7 @@ const RENDER_WEBHOOK_URL = process.env.RENDER_WEBHOOK_URL;
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 
 // --- Ethers.js Provider and Contract Addresses ---
-const provider = new ethers.JsonRpcProvider("https://base.publicnode.com");
+const provider = new ethers.JsonRpcProvider("https://base-mainnet.infura.io/v3/cceebb32fc834db39318ba89b48471a1");
 
 const managerAddress = "0x03a520b32c04bf3beef7beb72e919cf822ed34f1";
 const myAddress = "0x2FD24cC510b7a40b176B05A5Bb628d024e3B6886";
@@ -75,7 +75,8 @@ function getAmountsFromLiquidity(liquidity, sqrtPriceX96, sqrtLowerX96, sqrtUppe
 async function getTokenMeta(addr) {
     try {
         const t = new ethers.Contract(addr, erc20Abi, provider);
-        const [symbol, decimals] = await Promise.all([t.symbol(), t.decimals()]);
+        const symbol = await t.symbol();
+        const decimals = await t.decimals();
         return { symbol, decimals, address: addr };
     } catch {
         return { symbol: "UNKNOWN", decimals: 18, address: addr };
@@ -285,20 +286,16 @@ async function getFormattedPositionData(walletAddress) {
             }
             
             const pool = new ethers.Contract(dynamicPoolAddress, poolAbi, provider);
-
-            const [slot0, token0Addr, token1Addr] = await Promise.all([
-                pool.slot0(),
-                pool.token0(),
-                pool.token1()
-            ]);
+            
+            const slot0 = await pool.slot0();
+            const token0Addr = await pool.token0();
+            const token1Addr = await pool.token1();
             
             const sqrtP = slot0[0];
             const nativeTick = slot0[1];
 
-            const [t0, t1] = await Promise.all([
-                getTokenMeta(token0Addr),
-                getTokenMeta(token1Addr)
-            ]);
+            const t0 = await getTokenMeta(token0Addr);
+            const t1 = await getTokenMeta(token1Addr);
 
             const [sqrtL, sqrtU] = [
                 tickToSqrtPriceX96(Number(pos.tickLower)),
@@ -326,9 +323,9 @@ async function getFormattedPositionData(walletAddress) {
             let currentPositionStartDate = null;
             let currentPositionInitialPrincipalUSD = 0;
             let positionHistoryAnalysisSucceeded = false;
-            
+
             // ++ DEBUG: Added more detailed logging around the historical analysis block ++
-            console.log(`\n[DEBUG] Processing historical data for Token ID: ${tokenId.toString()}`);
+            console.log(`[DEBUG] Processing historical data for Token ID: ${tokenId.toString()}`);
             try {
                 const mintBlock = await getMintEventBlock(manager, tokenId, provider, walletAddress);
                 console.log(`[DEBUG] Found mintBlock: ${mintBlock} for token ${tokenId.toString()}`);
@@ -351,7 +348,7 @@ async function getFormattedPositionData(walletAddress) {
                 console.log(`[DEBUG] Attempting to fetch historical slot0 for block ${mintBlock}...`);
                 const historicalSlot0 = await pool.slot0({ blockTag: mintBlock });
                 console.log(`[DEBUG] Successfully fetched historical slot0 for block ${mintBlock}.`);
-
+                
                 const historicalTick = historicalSlot0.tick;
                 const historicalSqrtPriceX96 = tickToSqrtPriceX96(historicalTick);
 
@@ -372,7 +369,7 @@ async function getFormattedPositionData(walletAddress) {
                 }
                 
                 currentPositionInitialPrincipalUSD = histWETHamtCurrent * histWETHCurrent + histUSDCamtCurrent * histUSDCCurrent;
-                
+
                 if (currentPositionInitialPrincipalUSD > 0) {
                     positionHistoryAnalysisSucceeded = true;
                 }
