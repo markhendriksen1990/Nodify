@@ -318,7 +318,9 @@ async function getPositionsData(walletAddress) {
         const positionDataObject = { i, tokenId, t0, t1, pos, nativeTick, amt0, amt1, fee0, fee1, prices, sqrtL, sqrtU };
 
         try {
+            // ++ FIX: Pass the walletAddress to the function that needs it ++
             const mintBlock = await getMintEventBlock(manager, tokenId, provider, walletAddress);
+            
             const startTimestampMs = await getBlockTimestamp(mintBlock);
             positionDataObject.currentPositionStartDate = new Date(startTimestampMs);
 
@@ -334,11 +336,11 @@ async function getPositionsData(walletAddress) {
             const histWETHCurrent = await fetchHistoricalPrice('ethereum', dateStrCurrent);
             const histUSDCCurrent = await fetchHistoricalPrice('usd-coin', dateStrCurrent);
             
-            // ++ FIX: Correctly adjust for token decimals when calculating the price from CoinGecko data.
-            const decimalAdjustment = Math.pow(10, t1.decimals - t0.decimals);
-            const historicalPriceOfToken0 = (t0.symbol === "WETH" ? histWETHCurrent / histUSDCCurrent : histUSDCCurrent / histWETHCurrent) * decimalAdjustment;
+            const historicalPriceOfToken0 = t0.symbol === "WETH" ? histWETHCurrent / histUSDCCurrent : histUSDCCurrent / histWETHCurrent;
             const estimatedHistoricalTick = Math.log(historicalPriceOfToken0) / Math.log(1.0001);
-            const historicalSqrtPriceX96 = tickToSqrtPriceX96(Math.round(estimatedHistoricalTick));
+
+            // ++ FIX: Explicitly convert the BigInt tick to a Number before passing it to the math function ++
+            const historicalSqrtPriceX96 = tickToSqrtPriceX96(Number(estimatedHistoricalTick));
 
             const [histAmt0Current_raw, histAmt1Current_raw] = getAmountsFromLiquidity(
                 pos.liquidity, historicalSqrtPriceX96, sqrtL, sqrtU
