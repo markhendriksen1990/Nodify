@@ -317,30 +317,39 @@ async function getPositionsData(walletAddress) {
         
         const positionDataObject = { i, tokenId, t0, t1, pos, nativeTick, amt0, amt1, fee0, fee1, prices };
 
+        // ++ DEBUG: Added more detailed logging around the entire historical analysis block ++
         try {
-            console.log(`[DEBUG] Processing mint data for Token ID: ${tokenId.toString()}`);
+            console.log(`\n[DEBUG] --- Starting Historical Analysis for Token ID: ${tokenId.toString()} ---`);
             
-            // ++ FIX: Pass walletAddress to the function that needs it ++
             const mintBlock = await getMintEventBlock(manager, tokenId, provider, walletAddress);
-            
+            console.log(`[DEBUG] 1. Mint Block: ${mintBlock}`);
+
             const startTimestampMs = await getBlockTimestamp(mintBlock);
             positionDataObject.currentPositionStartDate = new Date(startTimestampMs);
-
+            console.log(`[DEBUG] 2. Mint Timestamp: ${positionDataObject.currentPositionStartDate.toISOString()}`);
+            
             const dayCurrent = positionDataObject.currentPositionStartDate.getDate().toString().padStart(2, '0');
             const monthCurrent = (positionDataObject.currentPositionStartDate.getMonth() + 1).toString().padStart(2, '0');
             const yearCurrent = positionDataObject.currentPositionStartDate.getFullYear();
             const dateStrCurrent = `${dayCurrent}-${monthCurrent}-${yearCurrent}`;
-            
+
             const histWETHCurrent = await fetchHistoricalPrice('ethereum', dateStrCurrent);
             const histUSDCCurrent = await fetchHistoricalPrice('usd-coin', dateStrCurrent);
-            
+            console.log(`[DEBUG] 3. CoinGecko Prices: WETH=$${histWETHCurrent}, USDC=$${histUSDCCurrent}`);
+
             const historicalPriceOfToken0 = t0.symbol === "WETH" ? histWETHCurrent / histUSDCCurrent : histUSDCCurrent / histWETHCurrent;
+            console.log(`[DEBUG] 4. Calculated Historical Price (Token0/Token1): ${historicalPriceOfToken0}`);
+
             const estimatedHistoricalTick = Math.log(historicalPriceOfToken0) / Math.log(1.0001);
+            console.log(`[DEBUG] 5. Estimated Historical Tick: ${Math.round(estimatedHistoricalTick)}`);
+
             const historicalSqrtPriceX96 = tickToSqrtPriceX96(Math.round(estimatedHistoricalTick));
+            console.log(`[DEBUG] 6. Estimated Historical SqrtPriceX96: ${historicalSqrtPriceX96.toString()}`);
 
             const [histAmt0Current_raw, histAmt1Current_raw] = getAmountsFromLiquidity(
                 pos.liquidity, historicalSqrtPriceX96, sqrtL, sqrtU
             );
+            console.log(`[DEBUG] 7. Raw Amounts from Liquidity: Amount0=${histAmt0Current_raw.toString()}, Amount1=${histAmt1Current_raw.toString()}`);
 
             if (t0.symbol.toUpperCase() === "WETH") {
                 positionDataObject.histWETHamtCurrent = parseFloat(formatUnits(histAmt0Current_raw, t0.decimals));
@@ -349,9 +358,12 @@ async function getPositionsData(walletAddress) {
                 positionDataObject.histWETHamtCurrent = parseFloat(formatUnits(histAmt1Current_raw, t1.decimals));
                 positionDataObject.histUSDCamtCurrent = parseFloat(formatUnits(histAmt0Current_raw, t0.decimals));
             }
+            console.log(`[DEBUG] 8. Parsed Initial Amounts: WETH=${positionDataObject.histWETHamtCurrent}, USDC=${positionDataObject.histUSDCamtCurrent}`);
             
             positionDataObject.currentPositionInitialPrincipalUSD = positionDataObject.histWETHamtCurrent * histWETHCurrent + positionDataObject.histUSDCamtCurrent * histUSDCCurrent;
             positionDataObject.positionHistoryAnalysisSucceeded = positionDataObject.currentPositionInitialPrincipalUSD > 0;
+            console.log(`[DEBUG] 9. Final Calculated Initial Investment: $${positionDataObject.currentPositionInitialPrincipalUSD.toFixed(2)}`);
+            console.log(`[DEBUG] --- End Historical Analysis for Token ID: ${tokenId.toString()} ---\n`);
 
         } catch (error) {
             console.error(`[DEBUG] ERROR during historical analysis for token ${tokenId.toString()}:`, error);
