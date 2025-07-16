@@ -318,7 +318,7 @@ async function getPositionsData(walletAddress) {
 
         try {
             console.log(`[DEBUG] Processing mint data for Token ID: ${tokenId.toString()}`);
-            const mintBlock = await getMintEventBlock(manager, tokenId, provider, walletAddress);
+            const mintBlock = await getMintEventBlock(manager, tokenId, provider, ownerAddress);
             
             const startTimestampMs = await getBlockTimestamp(mintBlock);
             positionDataObject.currentPositionStartDate = new Date(startTimestampMs);
@@ -331,9 +331,9 @@ async function getPositionsData(walletAddress) {
             const histWETHCurrent = await fetchHistoricalPrice('ethereum', dateStrCurrent);
             const histUSDCCurrent = await fetchHistoricalPrice('usd-coin', dateStrCurrent);
             
-            const historicalPriceOfToken0 = t0.symbol === "WETH" ? histWETHCurrent / histUSDCCurrent : histUSDCCurrent / histWETHCurrent;
-            const estimatedHistoricalTick = Math.log(historicalPriceOfToken0) / Math.log(1.0001);
-            const historicalSqrtPriceX96 = tickToSqrtPriceX96(Math.round(estimatedHistoricalTick));
+            const historicalSlot0 = await pool.slot0({ blockTag: mintBlock });
+            const historicalTick = historicalSlot0.tick;
+            const historicalSqrtPriceX96 = tickToSqrtPriceX96(historicalTick);
 
             const [histAmt0Current_raw, histAmt1Current_raw] = getAmountsFromLiquidity(
                 pos.liquidity, historicalSqrtPriceX96, sqrtL, sqrtU
@@ -438,17 +438,21 @@ async function getFormattedPositionData(walletAddress) {
             currentPositionMessage += `💰 ${formatTokenAmount(data.fee0, 6)} ${data.t0.symbol} ($${feeUSD0.toFixed(2)})\n`;
             currentPositionMessage += `💰 ${formatTokenAmount(data.fee1, 2)} ${data.t1.symbol} ($${feeUSD1.toFixed(2)})\n`;
             currentPositionMessage += `💰 Total Fees: *$${totalPositionFeesUSD.toFixed(2)}*\n`;
-
+            
+            // ++ FIX: Correctly define all variables before they are used ++
             if (data.positionHistoryAnalysisSucceeded) {
                 const now = new Date();
                 const elapsedMs = now.getTime() - data.currentPositionStartDate.getTime();
                 const rewardsPerYear = elapsedMs > 0 ? totalPositionFeesUSD * (365.25 * 24 * 60 * 60 * 1000) / elapsedMs : 0;
+                const rewardsPerDay = rewardsPerYear / 365.25;
+                const rewardsPerHour = rewardsPerDay / 24;
+                const rewardsPerMonth = rewardsPerYear / 12;
                 const feesAPR = (rewardsPerYear / data.currentPositionInitialPrincipalUSD) * 100;
 
                 currentPositionMessage += `\n*Fee Performance*\n`;
                 currentPositionMessage += `💧 Fees per hour: $${rewardsPerHour.toFixed(2)}\n`;
-                currentPositionMessage += `💧 Fees per day: $${(rewardsPerYear / 365.25).toFixed(2)}\n`;
-                currentPositionMessage += `💧 Fees per month: $${(rewardsPerYear / 12).toFixed(2)}\n`;
+                currentPositionMessage += `💧 Fees per day: $${rewardsPerDay.toFixed(2)}\n`;
+                currentPositionMessage += `💧 Fees per month: $${rewardsPerMonth.toFixed(2)}\n`;
                 currentPositionMessage += `💧 Fees per year: $${rewardsPerYear.toFixed(2)}\n`;
                 currentPositionMessage += `💧 Fees APR: ${feesAPR.toFixed(2)}%\n`;
             } else {
