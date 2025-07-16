@@ -4,6 +4,11 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 const { abi: FactoryAbi } = require('@uniswap/v3-core/artifacts/contracts/UniswapV3Factory.sol/UniswapV3Factory.json');
+// ++ NEW: Imports for image generation and sending file data ++
+const { createCanvas, loadImage, registerFont } = require('canvas');
+const FormData = require('form-data');
+const fs = require('fs');
+const path = require('path');
 
 
 // --- Configuration from Environment Variables ---
@@ -42,6 +47,15 @@ const erc20Abi = [
 
 const UINT128_MAX = "340282366920938463463374607431768211455";
 const { formatUnits } = ethers;
+
+// ++ NEW: Register the font for use in the canvas ++
+// Ensure you have a 'Roboto-Regular.ttf' file in your project directory
+if (fs.existsSync('Roboto-Regular.ttf')) {
+    registerFont('Roboto-Regular.ttf', { family: 'Roboto' });
+} else {
+    console.warn("Font file 'Roboto-Regular.ttf' not found. Text in snapshots may not render correctly.");
+}
+
 
 // --- Utility Functions ---
 
@@ -286,21 +300,15 @@ async function getFormattedPositionData(walletAddress) {
             
             const pool = new ethers.Contract(dynamicPoolAddress, poolAbi, provider);
 
-            const historicalSlot0ForInvestment = await pool.slot0({ blockTag: await getMintEventBlock(manager, tokenId, provider, walletAddress) });
-
-            const [slot0, token0Addr, token1Addr] = await Promise.all([
-                pool.slot0(),
-                pool.token0(),
-                pool.token1()
-            ]);
+            const slot0 = await pool.slot0();
+            const token0Addr = await pool.token0();
+            const token1Addr = await pool.token1();
             
             const sqrtP = slot0[0];
             const nativeTick = slot0[1];
 
-            const [t0, t1] = await Promise.all([
-                getTokenMeta(token0Addr),
-                getTokenMeta(token1Addr)
-            ]);
+            const t0 = await getTokenMeta(token0Addr);
+            const t1 = await getTokenMeta(token1Addr);
 
             const [sqrtL, sqrtU] = [
                 tickToSqrtPriceX96(Number(pos.tickLower)),
@@ -346,7 +354,9 @@ async function getFormattedPositionData(walletAddress) {
                 const histWETHCurrent = await fetchHistoricalPrice('ethereum', dateStrCurrent);
                 const histUSDCCurrent = await fetchHistoricalPrice('usd-coin', dateStrCurrent);
                 
-                const historicalTick = historicalSlot0ForInvestment.tick;
+                const historicalSlot0 = await pool.slot0({ blockTag: mintBlock });
+                
+                const historicalTick = historicalSlot0.tick;
                 const historicalSqrtPriceX96 = tickToSqrtPriceX96(historicalTick);
 
                 const [histAmt0Current_raw, histAmt1Current_raw] = getAmountsFromLiquidity(
@@ -402,7 +412,6 @@ async function getFormattedPositionData(walletAddress) {
 
             currentPositionMessage += `\n*Price Information*\n`;
             currentPositionMessage += `Range: $${lowerPrice.toFixed(2)} - $${upperPrice.toFixed(2)} ${t1.symbol}/${t0.symbol}\n`;
-            // ++ CHANGE: Icon removed and Ratio line moved here ++
             currentPositionMessage += `Current Price: $${currentPrice.toFixed(2)} ${t1.symbol}/${t0.symbol}\n`;
             currentPositionMessage += `Ratio: WETH/USDC ${ratio.weth}/${ratio.usdc}%\n`;
 
@@ -418,7 +427,7 @@ async function getFormattedPositionData(walletAddress) {
 
             const principalUSD = amtWETH * prices.WETH + amtUSDC * prices.USDC;
             totalPortfolioPrincipalUSD += principalUSD;
-
+            
             currentPositionMessage += `\n*Current Holdings*\n`;
             currentPositionMessage += `🏛 ${formatTokenAmount(amtWETH, 6)} WETH ($${(amtWETH * prices.WETH).toFixed(2)})\n`;
             currentPositionMessage += `🏛 ${formatTokenAmount(amtUSDC, 2)} USDC ($${(amtUSDC * prices.USDC).toFixed(2)})\n`;
@@ -448,7 +457,6 @@ async function getFormattedPositionData(walletAddress) {
                 const feesAPR = (rewardsPerYear / currentPositionInitialPrincipalUSD) * 100;
 
                 currentPositionMessage += `\n*Fee Performance*\n`;
-                // ++ CHANGE: Icons changed to water drops ++
                 currentPositionMessage += `💧 Fees per hour: $${rewardsPerHour.toFixed(2)}\n`;
                 currentPositionMessage += `💧 Fees per day: $${rewardsPerDay.toFixed(2)}\n`;
                 currentPositionMessage += `💧 Fees per month: $${rewardsPerMonth.toFixed(2)}\n`;
