@@ -558,7 +558,8 @@ async function getFormattedPositionData(allPositionsData, chain) {
 
 // ++ NEW: Helper function to find Aave Borrow events ++
 async function getAaveBorrowEvents(pool, provider, userAddress) {
-    const borrowFilter = pool.filters.Borrow(null, userAddress);
+    // ++ FIX: Filter by the indexed 'onBehalfOf' parameter (the third argument) ++
+    const borrowFilter = pool.filters.Borrow(null, null, userAddress);
     const events = await pool.queryFilter(borrowFilter, 0, 'latest');
     return events;
 }
@@ -617,7 +618,10 @@ async function getAaveData(walletAddress, chain) {
                 for(const address in borrowedAssets) {
                     const asset = borrowedAssets[address];
                     const principalAmount = parseFloat(formatUnits(asset.principal, asset.decimals));
-                    const principalValueUSD = principalAmount * (await fetchHistoricalPrice(asset.symbol.toLowerCase(), new Date(earliestBorrowTimestamp).toLocaleDateString('en-GB').replace(/\//g, '-')));
+                    const dayStr = new Date(earliestBorrowTimestamp).toLocaleDateString('en-GB').replace(/\//g, '-');
+                    const histPrice = await fetchHistoricalPrice(asset.symbol.toLowerCase(), dayStr);
+                    const principalValueUSD = principalAmount * histPrice;
+
                     totalPrincipalBorrowedUSD += principalValueUSD;
                     borrowedAssetDetails.push(`${asset.symbol}: $${principalValueUSD.toFixed(2)} at ${asset.borrowAPY.toFixed(2)}% APY`);
                 }
