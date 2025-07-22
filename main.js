@@ -20,80 +20,38 @@ const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 const chains = {
     base: {
         rpcUrl: "https://base.publicnode.com",
-        uniswap: {
-            managerAddress: "0x03a520b32c04bf3beef7beb72e919cf822ed34f1",
-            factoryAddress: '0x33128a8fC17869897dcE68Ed026d694621f6FDfD'
-        },
-        aave: {
-            poolAddress: "0xA238Dd80C259a72e81d7e4664a9801593F98d1c5",
-            dataProviderAddress: "0xC4Fcf9893072d61Cc2899C0054877Cb752587981"
-        }
+        managerAddress: "0x03a520b32c04bf3beef7beb72e919cf822ed34f1",
+        factoryAddress: '0x33128a8fC17869897dcE68Ed026d694621f6FDfD'
     },
     ethereum: {
         rpcUrl: "https://ethereum-rpc.publicnode.com",
-        uniswap: {
-            managerAddress: "0xC36442b4a4522E871399CD717aBDD847Ab11FE88",
-            factoryAddress: "0x1F98431c8aD98523631AE4a59f267346ea31F984"
-        },
-        aave: {
-            poolAddress: "0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2",
-            dataProviderAddress: "0x497a1994c46d4f6C864904A9f1fac6328Cb7C8a6"
-        }
-    },
-    bnb: {
-        rpcUrl: "https://bsc-rpc.publicnode.com",
-        uniswap: {
-            managerAddress: "0x7b8A01B39D58278b5DE7e48c8449c9f4F5170613",
-            factoryAddress: "0xdB1d10011AD0Ff90774D0C6Bb92e5C5c8b4461F7"
-        },
-        aave: {
-            poolAddress: "0x6807dc923806fE8Fd134338EABCA509979a7e0cB",
-            dataProviderAddress: "0x1e26247502e90b4fab9D0d17e4775e90085D2A35"
-        }
+        managerAddress: "0xC36442b4a4522E871399CD717aBDD847Ab11FE88",
+        factoryAddress: "0x1F98431c8aD98523631AE4a59f267346ea31F984"
     },
     polygon: {
         rpcUrl: "https://polygon-bor-rpc.publicnode.com",
-        uniswap: {
-            managerAddress: "0xC36442b4a4522E871399CD717aBDD847Ab11FE88",
-            factoryAddress: "0x1F98431c8aD98523631AE4a59f267346ea31F984"
-        },
-        aave: {
-            poolAddress: "0x794a61358D6845594F94dc1DB02A252b5b4814aD",
-            dataProviderAddress: "0x14496b405D62c24F91f04Cda1c69Dc526D56fDE5"
-        }
+        managerAddress: "0xC36442b4a4522E871399CD717aBDD847Ab11FE88",
+        factoryAddress: "0x1F98431c8aD98523631AE4a59f267346ea31F984"
     },
     avalanche: {
         rpcUrl: "https://avalanche-c-chain-rpc.publicnode.com",
-        uniswap: {
-            managerAddress: "0x655C406EBFa14EE2006250925e54ec43AD184f8B",
-            factoryAddress: "0x740b1c1de25031C31FF4fC9A62f554A55cdC1baD"
-        },
-        aave: {
-            poolAddress: "0x794a61358D6845594F94dc1DB02A252b5b4814aD",
-            dataProviderAddress: "0x14496b405D62c24F91f04Cda1c69Dc526D56fDE5"
-        }
+        managerAddress: "0x655C406EBFa14EE2006250925e54ec43AD184f8B",
+        factoryAddress: "0x740b1c1de25031C31FF4fC9A62f554A55cdC1baD"
     },
     optimism: {
         rpcUrl: "https://optimism-rpc.publicnode.com",
-        uniswap: {
-            managerAddress: "0xC36442b4a4522E871399CD717aBDD847Ab11FE88",
-            factoryAddress: "0x1F98431c8aD98523631AE4a59f267346ea31F984"
-        },
-        aave: {
-            poolAddress: "0x794a61358D6845594F94dc1DB02A252b5b4814aD",
-            dataProviderAddress: "0x14496b405D62c24F91f04Cda1c69Dc526D56fDE5"
-        }
+        managerAddress: "0xC36442b4a4522E871399CD717aBDD847Ab11FE88",
+        factoryAddress: "0x1F98431c8aD98523631AE4a59f267346ea31F984"
     },
     arbitrum: {
         rpcUrl: "https://arbitrum-one-rpc.publicnode.com",
-        uniswap: {
-            managerAddress: "0xC36442b4a4522E871399CD717aBDD847Ab11FE88",
-            factoryAddress: "0x1F98431c8aD98523631AE4a59f267346ea31F984"
-        },
-        aave: {
-            poolAddress: "0x794a61358D6845594F94dc1DB02A252b5b4814aD",
-            dataProviderAddress: "0x14496b405D62c24F91f04Cda1c69Dc526D56fDE5"
-        }
+        managerAddress: "0xC36442b4a4522E871399CD717aBDD847Ab11FE88",
+        factoryAddress: "0x1F98431c8aD98523631AE4a59f267346ea31F984"
+    },
+    bnb: {
+        rpcUrl: "https://bsc-rpc.publicnode.com",
+        managerAddress: "0x7b8A01B39D58278b5DE7e48c8449c9f4F5170613",
+        factoryAddress: "0xdB1d10011AD0Ff90774D0C6Bb92e5C5c8b4461F7"
     }
 };
 
@@ -131,16 +89,6 @@ const erc20Abi = [
     "function symbol() view returns (string)",
     "function decimals() view returns (uint8)"
 ];
-
-// ++ NEW: ABIs for Aave ++
-const aavePoolAbi = [
-    "function getUserAccountData(address user) view returns (uint256 totalCollateralBase, uint256 totalDebtBase, uint256 availableBorrowsBase, uint256 currentLiquidationThreshold, uint256 ltv, uint256 healthFactor)",
-    "event Borrow(address indexed reserve, address user, address indexed onBehalfOf, uint256 amount, uint8 interestRateMode, uint256 borrowRate, uint16 indexed referralCode)"
-];
-const aaveDataProviderAbi = [
-    "function getReserveData(address asset) view returns (tuple(uint256, uint256, uint256, uint256, uint256, uint256, uint256, uint256, uint256, uint256, uint256, uint256, uint40, uint16, bool, bool, bool))",
-];
-
 
 const UINT128_MAX = "340282366920938463463374607431768211455";
 const { formatUnits } = ethers;
@@ -247,7 +195,7 @@ function formatTokenAmount(val, decimals = 6) {
 function formatElapsedDaysHours(ms) {
     const days = Math.floor(ms / (1000 * 60 * 60 * 24));
     const hours = Math.floor((ms % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-    return `${days} days, ${hours} hours`;
+    return `${days} days, ${hours} `;
 }
 
 async function getMintEventBlock(manager, tokenId, provider, ownerAddress) {
@@ -355,11 +303,11 @@ async function fetchHistoricalPrice(coinId, dateStr) {
 
 // --- Main Data Fetching and Formatting Logic ---
 async function getPositionsData(walletAddress, chain) {
-    const chainConfig = chains[chain]?.uniswap;
+    const chainConfig = chains[chain];
     if (!chainConfig) {
-        throw new Error(`Unsupported chain for Uniswap: ${chain}`);
+        throw new Error(`Unsupported chain: ${chain}`);
     }
-    const provider = new ethers.JsonRpcProvider(chains[chain].rpcUrl);
+    const provider = new ethers.JsonRpcProvider(chainConfig.rpcUrl);
     
     const prices = await getUsdPrices();
     const manager = new ethers.Contract(chainConfig.managerAddress, managerAbi, provider);
@@ -456,147 +404,252 @@ async function getPositionsData(walletAddress, chain) {
     return positionsData;
 }
 
-// ... (Rest of the Uniswap and formatting functions remain the same) ...
 
-// ++ NEW: Aave Data Fetching and Formatting Logic ++
-async function getAaveData(walletAddress, chain) {
-    const chainConfig = chains[chain]?.aave;
-    if (!chainConfig) {
-        return null;
+async function getFormattedPositionData(allPositionsData, chain) {
+    if (allPositionsData.length === 0) {
+        return ``; 
     }
-    const provider = new ethers.JsonRpcProvider(chains[chain].rpcUrl);
+    
+    let chainReport = "";
+    
+    for (const data of allPositionsData) {
+        let currentPositionMessage = "";
+        // ++ CHANGE: Updated header format ++
+        currentPositionMessage += `\n---------- ${data.chain.toUpperCase()} -- Position #${data.i.toString()} ----------\n`;
+        currentPositionMessage += `🔹 Token ID: \`${data.tokenId.toString()}\`\n`;
+        currentPositionMessage += `🔸 Pool: ${data.t0.symbol}/${data.t1.symbol} (${Number(data.pos.fee)/10000}% fee)\n`;
+
+        if (data.positionHistoryAnalysisSucceeded) {
+            const adjustedDate = new Date(data.currentPositionStartDate.getTime() + (2 * 60 * 60 * 1000));
+            const day = adjustedDate.getDate().toString().padStart(2, '0');
+            const month = (adjustedDate.getMonth() + 1).toString().padStart(2, '0');
+            const year = adjustedDate.getFullYear();
+            const hours = adjustedDate.getHours().toString().padStart(2, '0');
+            const minutes = adjustedDate.getMinutes().toString().padStart(2, '0');
+
+            currentPositionMessage += `📅 Created: ${day}-${month}-${year} ${hours}:${minutes}\n`;
+            currentPositionMessage += `💰 Initial Investment: $${data.currentPositionInitialPrincipalUSD.toFixed(2)}\n`;
+        } else {
+            const sanitizedErrorMessage = (data.historyError?.message || "Unknown error").replace(/[*_`[\]]/g, '');
+            currentPositionMessage += `⚠️ Could not analyze position history: ${sanitizedErrorMessage}\n`;
+        }
+
+        const lowerPrice = tickToPricePerToken0(Number(data.pos.tickLower), Number(data.t0.decimals), Number(data.t1.decimals));
+        const upperPrice = tickToPricePerToken0(Number(data.pos.tickUpper), Number(data.t0.decimals), Number(data.t1.decimals));
+        const currentPrice = tickToPricePerToken0(Number(data.nativeTick), Number(data.t0.decimals), Number(data.t1.decimals));
+        
+        let amtWETH = 0, amtUSDC = 0;
+        if (data.t0.symbol.toUpperCase() === "WETH") { amtWETH = data.amt0; amtUSDC = data.amt1; } 
+        else { amtWETH = data.amt1; amtUSDC = data.amt0; }
+        const ratio = getRatio(amtWETH * data.prices.WETH, amtUSDC * data.prices.USDC);
+
+        currentPositionMessage += `\n*Price Information*\n`;
+        currentPositionMessage += `Range: $${lowerPrice.toFixed(2)} - $${upperPrice.toFixed(2)} ${data.t1.symbol}/${data.t0.symbol}\n`;
+        currentPositionMessage += `Current Price: $${currentPrice.toFixed(2)} ${data.t1.symbol}/${data.t0.symbol}\n`;
+        currentPositionMessage += `Ratio: WETH/USDC ${ratio.weth}/${ratio.usdc}%\n`;
+
+        const inRange = data.nativeTick >= data.pos.tickLower && data.nativeTick < data.pos.tickUpper;
+        currentPositionMessage += `📍 In Range? ${inRange ? "✅ Yes" : "❌ No"}\n`;
+        
+        const principalUSD = amtWETH * data.prices.WETH + amtUSDC * data.prices.USDC;
+
+        currentPositionMessage += `\n*Current Holdings*\n`;
+        currentPositionMessage += `🏛 ${formatTokenAmount(amtWETH, 6)} WETH ($${(amtWETH * data.prices.WETH).toFixed(2)})\n`;
+        currentPositionMessage += `🏛 ${formatTokenAmount(amtUSDC, 2)} USDC ($${(amtUSDC * data.prices.USDC).toFixed(2)})\n`;
+        currentPositionMessage += `🏛 Holdings: *$${principalUSD.toFixed(2)}*\n`;
+
+        const positionHoldingsChange = principalUSD - data.currentPositionInitialPrincipalUSD;
+        if (data.positionHistoryAnalysisSucceeded) {
+            currentPositionMessage += `📈 Holdings change: $${positionHoldingsChange.toFixed(2)}\n`;
+        }
+        
+        const feeUSD0 = data.fee0 * (data.t0.symbol.toUpperCase() === "WETH" ? data.prices.WETH : data.prices.USDC);
+        const feeUSD1 = data.fee1 * (data.t1.symbol.toUpperCase() === "WETH" ? data.prices.WETH : data.prices.USDC);
+        const totalPositionFeesUSD = feeUSD0 + feeUSD1;
+
+        currentPositionMessage += `\n*Uncollected Fees*\n`;
+        currentPositionMessage += `💰 ${formatTokenAmount(data.fee0, 6)} ${data.t0.symbol} ($${feeUSD0.toFixed(2)})\n`;
+        currentPositionMessage += `💰 ${formatTokenAmount(data.fee1, 2)} ${data.t1.symbol} ($${feeUSD1.toFixed(2)})\n`;
+        currentPositionMessage += `💰 Total Fees: *$${totalPositionFeesUSD.toFixed(2)}*\n`;
+        
+        if (data.positionHistoryAnalysisSucceeded) {
+            const now = new Date();
+            const elapsedMs = now.getTime() - data.currentPositionStartDate.getTime();
+            const rewardsPerYear = elapsedMs > 0 ? totalPositionFeesUSD * (365.25 * 24 * 60 * 60 * 1000) / elapsedMs : 0;
+            const rewardsPerDay = rewardsPerYear / 365.25;
+            const rewardsPerHour = rewardsPerDay / 24;
+            const rewardsPerMonth = rewardsPerYear / 12;
+            const feesAPR = (rewardsPerYear / data.currentPositionInitialPrincipalUSD) * 100;
+
+            currentPositionMessage += `\n*Fee Performance*\n`;
+            currentPositionMessage += `💧 Fees per hour: $${rewardsPerHour.toFixed(2)}\n`;
+            currentPositionMessage += `💧 Fees per day: $${rewardsPerDay.toFixed(2)}\n`;
+            currentPositionMessage += `💧 Fees per month: $${rewardsPerMonth.toFixed(2)}\n`;
+            currentPositionMessage += `💧 Fees per year: $${rewardsPerYear.toFixed(2)}\n`;
+            currentPositionMessage += `💧 Fees APR: ${feesAPR.toFixed(2)}%\n`;
+        } else {
+            currentPositionMessage += `\n⚠️ Could not determine per-position fee performance (initial investment unknown or zero).\n`;
+        }
+
+        const currentTotalValue = principalUSD + totalPositionFeesUSD;
+        currentPositionMessage += `\n🏦 Position Value: *$${currentTotalValue.toFixed(2)}*\n`;
+
+        const positionReturn = principalUSD - data.currentPositionInitialPrincipalUSD;
+        const positionTotalGains = positionReturn + totalPositionFeesUSD;
+        if (data.positionHistoryAnalysisSucceeded) {
+            currentPositionMessage += `📈 Position Total return + Fees: $${positionTotalGains.toFixed(2)}\n`;
+        }
+        
+        chainReport += currentPositionMessage;
+    }
+
+    return chainReport;
+}
+
+
+async function generateSnapshotImage(data) {
+    const width = 720;
+    const height = 1280;
+    const canvas = createCanvas(width, height);
+    const ctx = canvas.getContext('2d');
 
     try {
-        const pool = new ethers.Contract(chainConfig.poolAddress, aavePoolAbi, provider);
-        const dataProvider = new ethers.Contract(chainConfig.dataProviderAddress, aaveDataProviderAbi, provider);
-
-        const accountData = await pool.getUserAccountData(walletAddress);
-        if (accountData.totalDebtBase.toString() === '0') {
-            return null; // No Aave position
+        if (fs.existsSync('background.jpg')) {
+            const background = await loadImage('background.jpg');
+            ctx.drawImage(background, 0, 0, width, height);
+        } else {
+            ctx.fillStyle = '#1a202c';
+            ctx.fillRect(0, 0, width, height);
         }
-        
-        const healthFactor = parseFloat(formatUnits(accountData.healthFactor, 18));
-        let healthStatus = "Safe";
-        if (healthFactor < 1.5) healthStatus = "Careful";
-        if (healthFactor < 1.1) healthStatus = "DANGER";
-        
-        // This is a simplified version; a full implementation would scan for all borrow events
-        // to determine principal and start date accurately. For this example, we'll
-        // present the data available from the main contract calls.
-        const borrowedAssets = []; // This would be populated by scanning events
+    } catch (e) {
+        console.error("Could not load background image:", e);
+        ctx.fillStyle = '#1a202c';
+        ctx.fillRect(0, 0, width, height);
+    }
 
-        // For demonstration, let's assume we found one borrowed asset
-        // In a full implementation, you would scan for `Borrow` events for the user
-        // and then get the reserve data for each borrowed asset.
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
+    ctx.fillRect(50, 200, width - 100, 600);
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(50, 200, width - 100, 600);
+
+
+    ctx.fillStyle = '#FFFFFF';
+    ctx.textAlign = 'center';
+    
+    ctx.font = '40px Roboto';
+    ctx.fillText(`${data.pair} ${data.feeTier}`, width / 2, 260);
+    ctx.font = '30px Roboto';
+    ctx.fillText(`${data.timestamp}`, width / 2, 300);
+
+    ctx.font = '32px Roboto';
+    ctx.textAlign = 'left';
+
+    const drawLine = (label, value, y) => {
+        ctx.fillStyle = '#cccccc';
+        ctx.fillText(label, 70, y);
+        ctx.fillStyle = '#FFFFFF';
+        ctx.textAlign = 'right';
+        ctx.fillText(value, width - 70, y);
+        ctx.textAlign = 'left';
+    };
+    
+    const holdingsChangeColor = data.holdingsChange.startsWith('-') ? '#FF6B6B' : '#63FF84';
+
+    drawLine("Current Value:", data.currentValue, 380);
+    
+    ctx.fillStyle = '#cccccc';
+    ctx.fillText("Holdings Change:", 70, 440);
+    ctx.fillStyle = holdingsChangeColor;
+    ctx.textAlign = 'right';
+    ctx.fillText(data.holdingsChange, width - 70, 440);
+    ctx.textAlign = 'left';
+
+    drawLine(`Uncollected ${data.t0Symbol}:`, data.fees0, 530);
+    drawLine(`Uncollected ${data.t1Symbol}:`, data.fees1, 590);
+    drawLine("Total Fees:", data.totalFees, 650);
+    drawLine("Fees APR:", data.feesAPR, 710);
+
+    return canvas.toBuffer('image/png');
+}
+
+async function handleSnapshotCommand(allPositionsData, chain, chatId) {
+    if (allPositionsData.length === 0) {
+        return; 
+    }
+
+    for (const data of allPositionsData) {
+        const principalUSD = (data.amt0 * data.prices.WETH) + (data.amt1 * data.prices.USDC);
+        const positionHoldingsChange = principalUSD - data.currentPositionInitialPrincipalUSD;
+        const feeUSD0 = data.fee0 * (data.t0.symbol.toUpperCase() === "WETH" ? data.prices.WETH : data.prices.USDC);
+        const feeUSD1 = data.fee1 * (data.t1.symbol.toUpperCase() === "WETH" ? data.prices.WETH : data.prices.USDC);
+        const totalPositionFeesUSD = feeUSD0 + feeUSD1;
         
-        return {
-            totalCollateral: `$${parseFloat(formatUnits(accountData.totalCollateralBase, 8)).toFixed(2)}`,
-            totalDebt: `$${parseFloat(formatUnits(accountData.totalDebtBase, 8)).toFixed(2)}`,
-            healthFactor: `${healthFactor.toFixed(2)} - ${healthStatus}`,
-            borrowedAssets: "Note: Borrowed asset details require event scanning.", // Placeholder
-            lendingCosts: "Note: Lending cost calculation requires event scanning." // Placeholder
+        let feesAPR = "N/A";
+        let timestamp = "N/A";
+
+        if (data.positionHistoryAnalysisSucceeded) {
+             const now = new Date();
+             const elapsedMs = now.getTime() - data.currentPositionStartDate.getTime();
+             const rewardsPerYear = elapsedMs > 0 ? totalPositionFeesUSD * (365.25 * 24 * 60 * 60 * 1000) / elapsedMs : 0;
+             feesAPR = `${((rewardsPerYear / data.currentPositionInitialPrincipalUSD) * 100).toFixed(2)}%`;
+             const adjustedDate = new Date(data.currentPositionStartDate.getTime() + (2 * 60 * 60 * 1000));
+             const day = adjustedDate.getDate().toString().padStart(2, '0');
+             const month = (adjustedDate.getMonth() + 1).toString().padStart(2, '0');
+             const year = adjustedDate.getFullYear();
+             const hours = adjustedDate.getHours().toString().padStart(2, '0');
+             const minutes = adjustedDate.getMinutes().toString().padStart(2, '0');
+             timestamp = `${day}-${month}-${year} ${hours}:${minutes}`;
+        }
+
+        const snapshotData = {
+            timestamp: timestamp,
+            pair: `${data.t0.symbol}/${data.t1.symbol}`,
+            feeTier: `${(Number(data.pos.fee) / 10000).toFixed(2)}%`,
+            currentValue: `$${principalUSD.toFixed(2)}`,
+            holdingsChange: `${positionHoldingsChange.toFixed(2)}`,
+            t0Symbol: data.t0.symbol,
+            t1Symbol: data.t1.symbol,
+            fees0: formatTokenAmount(data.fee0, 6),
+            fees1: formatTokenAmount(data.fee1, 2),
+            totalFees: `$${totalPositionFeesUSD.toFixed(2)}`,
+            feesAPR: feesAPR
         };
-
-    } catch (error) {
-        console.error(`Error fetching Aave data on ${chain}:`, error);
-        return null;
+        
+        const imageBuffer = await generateSnapshotImage(snapshotData);
+        await sendPhoto(chatId, imageBuffer, `Position on ${chain}`);
     }
 }
 
 
-// --- Main Command Processing ---
-async function processTelegramCommand(update) {
-    if (update.message) {
-        const messageText = update.message.text;
-        const chatId = update.message.chat.id;
 
-        const [command, chainArg] = messageText.split(' ');
-        const chainName = chainArg?.toLowerCase();
+// --- Telegram API Functions ---
 
-        try {
-            if (command === '/positions' || command === '/snapshot') {
-                const chainsToQuery = chainName && chains[chainName] ? [chainName] : Object.keys(chains);
+async function setTelegramMenuCommands() {
+    const telegramApiUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setMyCommands`;
+    const commands = [
+        { command: 'start', description: 'Start info.' },
+        { command: 'positions', description: 'Overview of all LP positions.' },
+        { command: 'snapshot', description: 'Show off your gains.' }
+    ];
 
-                await sendMessage(chatId, `Searching for positions on: *${chainsToQuery.join(', ')}*... This may take a moment.`);
-                if (command === '/positions') await sendChatAction(chatId, 'typing');
-                if (command === '/snapshot') await sendChatAction(chatId, 'upload_photo');
-
-                // ++ NEW: Fetch both Uniswap and Aave data in parallel ++
-                const promises = chainsToQuery.map(async (chain) => {
-                    const uniPromise = getPositionsData(myAddress, chain).catch(e => ({ error: e, type: 'uniswap' }));
-                    const aavePromise = getAaveData(myAddress, chain).catch(e => ({ error: e, type: 'aave' }));
-                    return { chain, uniData: await uniPromise, aaveData: await aavePromise };
-                });
-                
-                const results = await Promise.all(promises);
-
-                let allChainMessages = "";
-                let successfulChains = [];
-                let failedChains = [];
-
-                for (const result of results) {
-                    if (result.uniData.error || result.aaveData.error) {
-                        failedChains.push(result.chain);
-                        if(result.uniData.error) console.error(`Failed to fetch Uniswap data for ${result.chain}:`, result.uniData.error);
-                        if(result.aaveData.error) console.error(`Failed to fetch Aave data for ${result.chain}:`, result.aaveData.error);
-                        continue;
-                    }
-                    
-                    if (result.uniData.length > 0 || result.aaveData) {
-                         successfulChains.push(result.chain);
-                    }
-
-                    if (command === '/positions') {
-                        let chainMessage = "";
-                        if(result.uniData.length > 0) {
-                            chainMessage += await getFormattedPositionData(result.uniData, result.chain);
-                        }
-                        if(result.aaveData) {
-                            chainMessage += `\n-------------- Aave Lending --------------\n`;
-                            chainMessage += `Total Collateral: ${result.aaveData.totalCollateral}  Total Debt: ${result.aaveData.totalDebt}\n`;
-                            chainMessage += `Health Factor: ${result.aaveData.healthFactor}\n`;
-                            // These lines would be populated with real data in a full implementation
-                            chainMessage += `Borrowed Assets: N/A (Requires event scanning)\n`;
-                            chainMessage += `Actual lending costs: N/A (Requires event scanning)\n`;
-                        }
-                        allChainMessages += chainMessage;
-                    }
-                }
-                
-                let finalMessage = `*👜 Wallet: ${myAddress.substring(0, 6)}...${myAddress.substring(38)}*\n\n`;
-                
-                if (allChainMessages) {
-                    finalMessage += allChainMessages;
-                } else if (successfulChains.length > 0) {
-                    finalMessage += "No active positions found on the queried chains.";
-                }
-
-                if (failedChains.length > 0) {
-                    finalMessage += `\n\n⚠️ Could not fetch data for the following chains: *${failedChains.join(', ')}*.`;
-                }
-
-                await sendMessage(chatId, finalMessage);
-
-            } else if (command === '/start') {
-                const startMessage = `Welcome! I am a Uniswap V3 & Aave V3 tracker.\n\n` +
-                                     `*/positions [chain]* - Get a detailed summary.\n` +
-                                     `*/snapshot [chain]* - Get an image snapshot (Uniswap only).\n\n` +
-                                     `If you don't specify a chain, I will search all supported chains.\n\n` +
-                                     `*Supported Chains:*\n` +
-                                     Object.keys(chains).join(', ');
-                await sendMessage(chatId, startMessage);
-            } else {
-                await sendMessage(chatId, "I only understand the /positions and /snapshot commands.");
-            }
-        } catch (error) {
-            console.error("Error in processTelegramCommand:", error);
-            await sendMessage(chatId, `An unexpected error occurred. Please try again later.`);
+    try {
+        const response = await fetch(telegramApiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ commands: commands })
+        });
+        const data = await response.json();
+        if (data.ok) {
+            console.log("Successfully set Telegram menu commands.");
+        } else {
+            console.error("Failed to set Telegram menu commands:", data);
         }
+    } catch (error) {
+        console.error('Error setting Telegram menu commands:', error);
     }
 }
 
-
-// ... (The rest of the Express server setup, sendMessage, sendPhoto, sendChatAction functions remain the same) ...
 
 // --- Express App Setup for Webhook ---
 const app = express();
@@ -615,6 +668,132 @@ app.post(`/bot${TELEGRAM_BOT_TOKEN}/webhook`, async (req, res) => {
         console.error("Unhandled error in async Telegram command processing:", error);
     });
 });
+
+async function processTelegramCommand(update) {
+    if (update.message) {
+        const messageText = update.message.text;
+        const chatId = update.message.chat.id;
+
+        const [command, chainArg] = messageText.split(' ');
+        const chainName = chainArg?.toLowerCase();
+
+        try {
+            if (command === '/positions' || command === '/snapshot') {
+                const chainsToQuery = chainName && chains[chainName] ? [chainName] : Object.keys(chains);
+
+                await sendMessage(chatId, `Searching for positions on: *${chainsToQuery.join(', ')}*... This may take a moment.`);
+                if (command === '/positions') await sendChatAction(chatId, 'typing');
+                if (command === '/snapshot') await sendChatAction(chatId, 'upload_photo');
+
+                const promises = chainsToQuery.map(chain => getPositionsData(myAddress, chain).then(data => ({ chain, data, status: 'fulfilled' })).catch(error => ({ chain, error, status: 'rejected' })));
+                const results = await Promise.all(promises);
+
+                let successfulResults = [];
+                let failedChains = [];
+                
+                let allChainMessages = "";
+                // ++ FIX: Initialize a global data object for the overall summary ++
+                let grandOverallData = {
+                    totalFeeUSD: 0,
+                    startPrincipalUSD: null,
+                    startDate: null,
+                    totalPortfolioPrincipalUSD: 0,
+                    totalPositions: 0
+                };
+                
+                for (const result of results) {
+                    if (result.status === 'fulfilled' && result.data.length > 0) {
+                        successfulResults.push(result);
+                        if (command === '/positions') {
+                            allChainMessages += await getFormattedPositionData(result.data, result.chain);
+                            
+                            // ++ FIX: Aggregate data for the overall summary ++
+                            for (const posData of result.data) {
+                                if (posData.positionHistoryAnalysisSucceeded) {
+                                    if (!grandOverallData.startDate || posData.currentPositionStartDate.getTime() < grandOverallData.startDate.getTime()) {
+                                        grandOverallData.startDate = posData.currentPositionStartDate;
+                                        grandOverallData.startPrincipalUSD = posData.currentPositionInitialPrincipalUSD;
+                                    }
+                                }
+                                const principalUSD = (posData.amt0 * posData.prices.WETH) + (posData.amt1 * posData.prices.USDC);
+                                const feeUSD0 = posData.fee0 * (posData.t0.symbol.toUpperCase() === "WETH" ? posData.prices.WETH : posData.prices.USDC);
+                                const feeUSD1 = posData.fee1 * (posData.t1.symbol.toUpperCase() === "WETH" ? posData.prices.WETH : posData.prices.USDC);
+                                
+                                grandOverallData.totalPortfolioPrincipalUSD += principalUSD;
+                                grandOverallData.totalFeeUSD += (feeUSD0 + feeUSD1);
+                                grandOverallData.totalPositions++;
+                            }
+                        }
+                    } else if (result.status === 'rejected') {
+                        failedChains.push(result.chain);
+                        console.error(`Failed to fetch data for ${result.chain}:`, result.error);
+                    }
+                }
+                
+                if (command === '/snapshot') {
+                    for (const result of successfulResults) {
+                         await handleSnapshotCommand(result.data, result.chain, chatId);
+                    }
+                }
+                
+                let finalMessage = "";
+                if (command === '/positions') {
+                     if (allChainMessages) {
+                        finalMessage = `*👜 Wallet: ${myAddress.substring(0, 6)}...${myAddress.substring(38)}*\n\n` + allChainMessages;
+                        
+                        // ++ FIX: Add the restored overall performance section ++
+                        if (grandOverallData.startDate && grandOverallData.startPrincipalUSD !== null) {
+                            const now = new Date();
+                            const elapsedMs = now.getTime() - grandOverallData.startDate.getTime();
+                            const rewardsPerYear = elapsedMs > 0 ? grandOverallData.totalFeeUSD * (365.25 * 24 * 60 * 60 * 1000) / elapsedMs : 0;
+                            const totalReturn = grandOverallData.totalPortfolioPrincipalUSD - grandOverallData.startPrincipalUSD;
+                            const totalReturnPercent = (totalReturn / grandOverallData.startPrincipalUSD) * 100;
+                            const feesAPR = (rewardsPerYear / grandOverallData.startPrincipalUSD) * 100;
+
+                            finalMessage += `\n====== OVERALL PERFORMANCE ======\n`;
+                            finalMessage += `(Based on the *${grandOverallData.totalPositions}* displayed position(s))\n`;
+                            finalMessage += `🏛 Initial Investment: $${grandOverallData.startPrincipalUSD.toFixed(2)}\n`;
+                            finalMessage += `🏛 Total Holdings: $${grandOverallData.totalPortfolioPrincipalUSD.toFixed(2)}\n`;
+                            finalMessage += `📈 Holdings Change: $${totalReturn.toFixed(2)} (${totalReturnPercent.toFixed(2)}%)\n`;
+
+                            finalMessage += `\n*Fee Performance*\n`;
+                            finalMessage += `💰 Total Fees Earned: $${grandOverallData.totalFeeUSD.toFixed(2)}\n`;
+                            finalMessage += `💰 Fees APR: ${feesAPR.toFixed(2)}%\n`;
+
+                            const allTimeGains = totalReturn + grandOverallData.totalFeeUSD;
+                            finalMessage += `\n📈 Total return + Fees: $${allTimeGains.toFixed(2)}\n`;
+                        }
+                    }
+                }
+                
+                if (successfulResults.length === 0 && failedChains.length === 0) {
+                    finalMessage = "No active Uniswap V3 positions found on any of the queried chains.";
+                } else if (failedChains.length > 0) {
+                    finalMessage += `\n\n⚠️ Could not fetch data for the following chains: *${failedChains.join(', ')}*. The RPC node may be down or the contracts may not be deployed there.`;
+                }
+
+                if (finalMessage) {
+                    await sendMessage(chatId, finalMessage);
+                }
+
+            } else if (command === '/start') {
+                const startMessage = `Welcome! I am a Uniswap V3 LP Position tracker.\n\n` +
+                                     `Here are the available commands:\n` +
+                                     `*/positions [chain]* - Get a detailed text summary.\n` +
+                                     `*/snapshot [chain]* - Receive an image snapshot.\n\n` +
+                                     `If you don't specify a chain, the bot will search on all supported chains.\n\n`+
+                                     `*Supported Chains:*\n` +
+                                     Object.keys(chains).join(', ');
+                await sendMessage(chatId, startMessage);
+            } else {
+                await sendMessage(chatId, "I received your message, but I only understand the /positions and /snapshot commands. Please select one from the menu.");
+            }
+        } catch (error) {
+            console.error("Error in processTelegramCommand:", error);
+            await sendMessage(chatId, `An unexpected error occurred. Please try again later.`);
+        }
+    }
+}
 
 async function sendMessage(chatId, text) {
     const telegramApiUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
@@ -684,7 +863,6 @@ async function sendChatAction(chatId, action) {
     }
 }
 
-// Start the Express server
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
     setTelegramMenuCommands();
