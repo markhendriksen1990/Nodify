@@ -17,11 +17,46 @@ const RENDER_WEBHOOK_URL = process.env.RENDER_WEBHOOK_URL;
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 
 // --- Ethers.js Provider and Contract Addresses ---
-const provider = new ethers.JsonRpcProvider("https://base.publicnode.com");
+// ++ NEW: Chain Configuration Object ++
+const chains = {
+    base: {
+        rpcUrl: "https://base.publicnode.com",
+        managerAddress: "0x03a520b32c04bf3beef7beb72e919cf822ed34f1",
+        factoryAddress: '0x33128a8fC17869897dcE68Ed026d694621f6FDfD'
+    },
+    ethereum: {
+        rpcUrl: "https://ethereum-rpc.publicnode.com",
+        managerAddress: "0xC36442b4a4522E871399CD717aBDD847Ab11FE88",
+        factoryAddress: "0x1F98431c8aD98523631AE4a59f267346ea31F984"
+    },
+    polygon: {
+        rpcUrl: "https://polygon-bor-rpc.publicnode.com",
+        managerAddress: "0xC36442b4a4522E871399CD717aBDD847Ab11FE88",
+        factoryAddress: "0x1F98431c8aD98523631AE4a59f267346ea31F984"
+    },
+    avalanche: {
+        rpcUrl: "https://avalanche-c-chain-rpc.publicnode.com",
+        managerAddress: "0x655C406EBFa14EE2006250925e54ec43AD184f8B",
+        factoryAddress: "0x740b1c1de25031C31FF4fC9A62f554A55cdC1baD"
+    },
+    optimism: {
+        rpcUrl: "https://optimism-rpc.publicnode.com",
+        managerAddress: "0xC36442b4a4522E871399CD717aBDD847Ab11FE88",
+        factoryAddress: "0x1F98431c8aD98523631AE4a59f267346ea31F984"
+    },
+    arbitrum: {
+        rpcUrl: "https://arbitrum-one-rpc.publicnode.com",
+        managerAddress: "0xC36442b4a4522E871399CD717aBDD847Ab11FE88",
+        factoryAddress: "0x1F98431c8aD98523631AE4a59f267346ea31F984"
+    },
+    bnb: {
+        rpcUrl: "https://bsc-rpc.publicnode.com",
+        managerAddress: "0x7b8A01B39D58278b5DE7e48c8449c9f4F5170613",
+        factoryAddress: "0xdB1d10011AD0Ff90774D0C6Bb92e5C5c8b4461F7"
+    }
+};
 
-const managerAddress = "0x03a520b32c04bf3beef7beb72e919cf822ed34f1";
 const myAddress = "0x2FD24cC510b7a40b176B05A5Bb628d024e3B6886";
-const factoryAddress = '0x33128a8fC17869897dcE68Ed026d694621f6FDfD';
 
 // --- Register Font for Image Snapshots ---
 try {
@@ -88,7 +123,7 @@ function getAmountsFromLiquidity(liquidity, sqrtPriceX96, sqrtLowerX96, sqrtUppe
     return [amount0, amount1];
 }
 
-async function getTokenMeta(addr) {
+async function getTokenMeta(addr, provider) {
     try {
         const t = new ethers.Contract(addr, erc20Abi, provider);
         const symbol = await t.symbol();
@@ -219,7 +254,7 @@ async function getMintEventBlock(manager, tokenId, provider, ownerAddress) {
 }
 
 
-async function getBlockTimestamp(blockNumber) {
+async function getBlockTimestamp(blockNumber, provider) {
     const block = await provider.getBlock(blockNumber);
     return block.timestamp * 1000;
 }
@@ -268,10 +303,13 @@ async function fetchHistoricalPrice(coinId, dateStr) {
 
 
 // --- Main Data Fetching and Formatting Logic ---
-async function getPositionsData(walletAddress) {
+async function getPositionsData(walletAddress, chain) {
+    const chainConfig = chains[chain];
+    const provider = new ethers.JsonRpcProvider(chainConfig.rpcUrl);
+    
     const prices = await getUsdPrices();
-    const manager = new ethers.Contract(managerAddress, managerAbi, provider);
-    const factory = new ethers.Contract(factoryAddress, FactoryAbi, provider);
+    const manager = new ethers.Contract(chainConfig.managerAddress, managerAbi, provider);
+    const factory = new ethers.Contract(chainConfig.factoryAddress, FactoryAbi, provider);
     const balance = await manager.balanceOf(walletAddress);
 
     if (balance === 0n) {
@@ -297,8 +335,8 @@ async function getPositionsData(walletAddress) {
         const sqrtP = slot0[0];
         const nativeTick = slot0[1];
 
-        const t0 = await getTokenMeta(token0Addr);
-        const t1 = await getTokenMeta(token1Addr);
+        const t0 = await getTokenMeta(token0Addr, provider);
+        const t1 = await getTokenMeta(token1Addr, provider);
 
         const [sqrtL, sqrtU] = [ tickToSqrtPriceX96(Number(pos.tickLower)), tickToSqrtPriceX96(Number(pos.tickUpper)) ];
         const [raw0, raw1] = getAmountsFromLiquidity(pos.liquidity, sqrtP, sqrtL, sqrtU);
@@ -313,11 +351,11 @@ async function getPositionsData(walletAddress) {
             continue;
         }
         
-        const positionDataObject = { i, tokenId, t0, t1, pos, nativeTick, amt0, amt1, fee0, fee1, prices, sqrtL, sqrtU };
+        const positionDataObject = { i, tokenId, t0, t1, pos, nativeTick, amt0, amt1, fee0, fee1, prices, sqrtL, sqrtU, chain };
 
         try {
             const mintBlock = await getMintEventBlock(manager, tokenId, provider, walletAddress);
-            const startTimestampMs = await getBlockTimestamp(mintBlock);
+            const startTimestampMs = await getBlockTimestamp(mintBlock, provider);
             positionDataObject.currentPositionStartDate = new Date(startTimestampMs);
 
             if (!positionDataObject.startDate || positionDataObject.currentPositionStartDate.getTime() < positionDataObject.startDate.getTime()) {
@@ -365,14 +403,14 @@ async function getPositionsData(walletAddress) {
 }
 
 
-async function getFormattedPositionData(walletAddress) {
+async function getFormattedPositionData(walletAddress, chain) {
     let responseMessage = "";
     
     try {
-        const allPositionsData = await getPositionsData(walletAddress);
+        const allPositionsData = await getPositionsData(walletAddress, chain);
 
         if (allPositionsData.length === 0) {
-            return `*👜 Wallet: ${walletAddress.substring(0, 6)}...${walletAddress.substring(38)}*\n\n✨ You own *0* Uniswap V3 positions with value.`;
+            return `*👜 Wallet: ${walletAddress.substring(0, 6)}...${walletAddress.substring(38)}*\n\n✨ You own *0* Uniswap V3 positions with value on the ${chain} network.`;
         }
         
         const positionMessages = [];
@@ -481,7 +519,7 @@ async function getFormattedPositionData(walletAddress) {
         }
 
         responseMessage = `*👜 Wallet: ${walletAddress.substring(0, 6)}...${walletAddress.substring(38)}*\n\n`;
-        responseMessage += `✨ Displaying *${positionMessages.length}* of *${allPositionsData.length}* total positions with value.\n`;
+        responseMessage += `✨ Displaying *${positionMessages.length}* of *${allPositionsData.length}* total positions with value on the ${chain} network.\n`;
         responseMessage += positionMessages.join('');
 
         if (overallData.startDate && overallData.startPrincipalUSD !== null) {
@@ -583,12 +621,13 @@ async function generateSnapshotImage(data) {
     return canvas.toBuffer('image/png');
 }
 
-async function handleSnapshotCommand(chatId) {
+async function handleSnapshotCommand(chatId, chain) {
     try {
-        const allPositionsData = await getPositionsData(myAddress);
+        await sendChatAction(chatId, 'upload_photo');
+        const allPositionsData = await getPositionsData(myAddress, chain);
 
         if (allPositionsData.length === 0) {
-            await sendMessage(chatId, "No positions with value found to create a snapshot.");
+            await sendMessage(chatId, `No positions with value found on the ${chain} network to create a snapshot.`);
             return;
         }
 
@@ -644,7 +683,6 @@ async function handleSnapshotCommand(chatId) {
 
 // --- Telegram API Functions ---
 
-// ++ NEW: Function to set the bot's menu commands in Telegram ++
 async function setTelegramMenuCommands() {
     const telegramApiUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setMyCommands`;
     const commands = [
@@ -694,23 +732,28 @@ async function processTelegramCommand(update) {
         const messageText = update.message.text;
         const chatId = update.message.chat.id;
 
-        if (messageText && messageText.startsWith('/positions')) {
+        const [command, chainName] = messageText.split(' ');
+        const chain = chains[chainName?.toLowerCase()] ? chainName.toLowerCase() : 'base';
+
+        if (command && command.startsWith('/positions')) {
             try {
                 await sendChatAction(chatId, 'typing');
-                const positionData = await getFormattedPositionData(myAddress);
+                const positionData = await getFormattedPositionData(myAddress, chain);
                 await sendMessage(chatId, positionData);
             } catch (error) {
                 console.error("Error processing /positions command asynchronously:", error);
-                await sendMessage(chatId, "Sorry, I encountered an internal error while fetching positions. Please try again later.");
+                await sendMessage(chatId, `Sorry, I encountered an error while fetching positions on ${chain}. Please try again later.`);
             }
-        } else if (messageText && messageText.startsWith('/snapshot')) {
-             await handleSnapshotCommand(chatId);
-        } else if (messageText && messageText.startsWith('/start')) {
+        } else if (command && command.startsWith('/snapshot')) {
+             await handleSnapshotCommand(chatId, chain);
+        } else if (command && command.startsWith('/start')) {
             const startMessage = `Welcome! I am a Uniswap V3 LP Position tracker.\n\n` +
                                  `Here are the available commands:\n` +
-                                 `*/positions* - Get a detailed text summary of your LP positions.\n` +
-                                 `*/snapshot* - Receive an image snapshot of each of your LP positions.\n\n` +
-                                 `Currently, I am configured to work with the *Base* network.`;
+                                 `*/positions [chain]* - Get a detailed text summary.\n` +
+                                 `*/snapshot [chain]* - Receive an image snapshot.\n\n` +
+                                 `If you don't specify a chain, it will default to *Base*.\n\n`+
+                                 `*Supported Chains:*\n` +
+                                 Object.keys(chains).join(', ');
             await sendMessage(chatId, startMessage);
         } else {
             await sendMessage(chatId, "I received your message, but I only understand the /positions and /snapshot commands. Please select one from the menu.");
