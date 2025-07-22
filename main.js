@@ -400,7 +400,7 @@ async function getFormattedPositionData(walletAddress) {
                 const year = adjustedDate.getFullYear();
                 const hours = adjustedDate.getHours().toString().padStart(2, '0');
                 const minutes = adjustedDate.getMinutes().toString().padStart(2, '0');
-                
+
                 currentPositionMessage += `📅 Created: ${day}-${month}-${year} ${hours}:${minutes}\n`;
                 currentPositionMessage += `💰 Initial Investment: $${data.currentPositionInitialPrincipalUSD.toFixed(2)}\n`;
             } else {
@@ -585,8 +585,6 @@ async function generateSnapshotImage(data) {
 
 async function handleSnapshotCommand(chatId) {
     try {
-        console.log("[DEBUG] '/snapshot' command received. Starting generation...");
-        await sendChatAction(chatId, 'upload_photo');
         const allPositionsData = await getPositionsData(myAddress);
 
         if (allPositionsData.length === 0) {
@@ -595,8 +593,6 @@ async function handleSnapshotCommand(chatId) {
         }
 
         for (const data of allPositionsData) {
-            console.log(`[DEBUG] [Snapshot] Generating image for tokenId: ${data.tokenId.toString()}`);
-            
             const principalUSD = (data.amt0 * data.prices.WETH) + (data.amt1 * data.prices.USDC);
             const positionHoldingsChange = principalUSD - data.currentPositionInitialPrincipalUSD;
             const feeUSD0 = data.fee0 * (data.t0.symbol.toUpperCase() === "WETH" ? data.prices.WETH : data.prices.USDC);
@@ -623,7 +619,7 @@ async function handleSnapshotCommand(chatId) {
             const snapshotData = {
                 timestamp: timestamp,
                 pair: `${data.t0.symbol}/${data.t1.symbol}`,
-                feeTier: `${Number(data.pos.fee) / 10000}%`,
+                feeTier: `${(Number(data.pos.fee) / 10000).toFixed(2)}%`,
                 currentValue: `$${principalUSD.toFixed(2)}`,
                 holdingsChange: `${positionHoldingsChange.toFixed(2)}`,
                 t0Symbol: data.t0.symbol,
@@ -634,10 +630,7 @@ async function handleSnapshotCommand(chatId) {
                 feesAPR: feesAPR
             };
             
-            console.log("[DEBUG] [Snapshot] Data for image:", snapshotData);
-
             const imageBuffer = await generateSnapshotImage(snapshotData);
-            console.log(`[DEBUG] [Snapshot] Image buffer created for tokenId: ${data.tokenId.toString()}. Sending to Telegram...`);
             await sendPhoto(chatId, imageBuffer);
         }
 
@@ -647,6 +640,35 @@ async function handleSnapshotCommand(chatId) {
     }
 }
 
+
+
+// --- Telegram API Functions ---
+
+// ++ NEW: Function to set the bot's menu commands in Telegram ++
+async function setTelegramMenuCommands() {
+    const telegramApiUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setMyCommands`;
+    const commands = [
+        { command: 'start', description: 'Start info.' },
+        { command: 'positions', description: 'Overview of all LP positions.' },
+        { command: 'snapshot', description: 'Show off your gains.' }
+    ];
+
+    try {
+        const response = await fetch(telegramApiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ commands: commands })
+        });
+        const data = await response.json();
+        if (data.ok) {
+            console.log("Successfully set Telegram menu commands.");
+        } else {
+            console.error("Failed to set Telegram menu commands:", data);
+        }
+    } catch (error) {
+        console.error('Error setting Telegram menu commands:', error);
+    }
+}
 
 
 // --- Express App Setup for Webhook ---
@@ -684,7 +706,12 @@ async function processTelegramCommand(update) {
         } else if (messageText && messageText.startsWith('/snapshot')) {
              await handleSnapshotCommand(chatId);
         } else if (messageText && messageText.startsWith('/start')) {
-            await sendMessage(chatId, "Welcome! I can provide you with information about your Uniswap V3 liquidity positions. Type /positions for a text summary or /snapshot for an image summary.");
+            const startMessage = `Welcome! I am a Uniswap V3 LP Position tracker.\n\n` +
+                                 `Here are the available commands:\n` +
+                                 `*/positions* - Get a detailed text summary of your LP positions.\n` +
+                                 `*/snapshot* - Receive an image snapshot of each of your LP positions.\n\n` +
+                                 `Currently, I am configured to work with the *Base* network.`;
+            await sendMessage(chatId, startMessage);
         } else {
             await sendMessage(chatId, "I received your message, but I only understand the /positions and /snapshot commands. Please select one from the menu.");
         }
@@ -735,7 +762,7 @@ async function sendPhoto(chatId, photoBuffer, caption = '') {
         if (!response.ok) {
             console.error('Failed to send photo:', data);
         } else {
-             console.log(`[DEBUG] [Snapshot] Successfully sent photo to chat ID: ${chatId}`);
+             console.log(`Successfully sent photo to chat ID: ${chatId}`);
         }
     } catch (error) {
         console.error('Error sending photo to Telegram:', error);
@@ -761,5 +788,6 @@ async function sendChatAction(chatId, action) {
 
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
+    setTelegramMenuCommands();
     console.log(`Telegram webhook URL: ${RENDER_WEBHOOK_URL}/bot${TELEGRAM_BOT_TOKEN}/webhook`);
 });
