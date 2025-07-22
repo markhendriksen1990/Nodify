@@ -556,6 +556,13 @@ async function getFormattedPositionData(allPositionsData, chain) {
     return chainReport;
 }
 
+// ++ NEW: Helper function to find Aave Borrow events ++
+async function getAaveBorrowEvents(pool, provider, userAddress) {
+    const borrowFilter = pool.filters.Borrow(null, userAddress);
+    const events = await pool.queryFilter(borrowFilter, 0, 'latest');
+    return events;
+}
+
 // ++ NEW: Aave Data Fetching and Formatting Logic ++
 async function getAaveData(walletAddress, chain) {
     const chainConfig = chains[chain]?.aave;
@@ -566,24 +573,69 @@ async function getAaveData(walletAddress, chain) {
 
     try {
         const pool = new ethers.Contract(chainConfig.poolAddress, aavePoolAbi, provider);
+        const dataProvider = new ethers.Contract(chainConfig.dataProviderAddress, aaveDataProviderAbi, provider);
         const accountData = await pool.getUserAccountData(walletAddress);
-        
-        // ++ FIX: Check for collateral instead of debt ++
+
         if (accountData.totalCollateralBase.toString() === '0') {
             return null; // No Aave position
         }
-        
+
         const healthFactor = parseFloat(formatUnits(accountData.healthFactor, 18));
         let healthStatus = "Safe";
         if (healthFactor < 1.5) healthStatus = "Careful";
         if (healthFactor < 1.1) healthStatus = "DANGER";
-        
+
+        let borrowedAssetsString = "None";
+        let lendingCostsString = "$0.00 over 0 days";
+
+        if (accountData.totalDebtBase.toString() > '0') {
+            const borrowEvents = await getAaveBorrowEvents(pool, provider, walletAddress);
+            
+            if (borrowEvents.length > 0) {
+                const borrowedAssets = {};
+                let earliestBorrowTimestamp = Date.now();
+                let totalPrincipalBorrowedUSD = 0;
+
+                for (const event of borrowEvents) {
+                    const reserveAddress = event.args.reserve;
+                    if (!borrowedAssets[reserveAddress]) {
+                        const tokenMeta = await getTokenMeta(reserveAddress, provider);
+                        const reserveData = await dataProvider.getReserveData(reserveAddress);
+                        const variableBorrowRate = reserveData[5]; // variableBorrowRate is at index 5
+                        const borrowAPY = parseFloat(formatUnits(variableBorrowRate, 27)) * 100;
+                        borrowedAssets[reserveAddress] = { ...tokenMeta, borrowAPY, principal: 0n };
+                    }
+                    borrowedAssets[reserveAddress].principal += event.args.amount;
+                    
+                    const block = await provider.getBlock(event.blockNumber);
+                    if (block.timestamp * 1000 < earliestBorrowTimestamp) {
+                        earliestBorrowTimestamp = block.timestamp * 1000;
+                    }
+                }
+                
+                let borrowedAssetDetails = [];
+                for(const address in borrowedAssets) {
+                    const asset = borrowedAssets[address];
+                    const principalAmount = parseFloat(formatUnits(asset.principal, asset.decimals));
+                    const principalValueUSD = principalAmount * (await fetchHistoricalPrice(asset.symbol.toLowerCase(), new Date(earliestBorrowTimestamp).toLocaleDateString('en-GB').replace(/\//g, '-')));
+                    totalPrincipalBorrowedUSD += principalValueUSD;
+                    borrowedAssetDetails.push(`${asset.symbol}: $${principalValueUSD.toFixed(2)} at ${asset.borrowAPY.toFixed(2)}% APY`);
+                }
+                borrowedAssetsString = borrowedAssetDetails.join(', ');
+                
+                const totalDebtUSD = parseFloat(formatUnits(accountData.totalDebtBase, 8));
+                const interestAccrued = totalDebtUSD - totalPrincipalBorrowedUSD;
+                const loanDuration = Date.now() - earliestBorrowTimestamp;
+                lendingCostsString = `$${interestAccrued.toFixed(2)} over ${formatElapsedDaysHours(loanDuration)}`;
+            }
+        }
+
         return {
             totalCollateral: `$${parseFloat(formatUnits(accountData.totalCollateralBase, 8)).toFixed(2)}`,
             totalDebt: `$${parseFloat(formatUnits(accountData.totalDebtBase, 8)).toFixed(2)}`,
             healthFactor: `${healthFactor.toFixed(2)} - ${healthStatus}`,
-            borrowedAssets: "Note: Borrowed asset details require event scanning.",
-            lendingCosts: "Note: Lending cost calculation requires event scanning."
+            borrowedAssets: borrowedAssetsString,
+            lendingCosts: lendingCostsString
         };
 
     } catch (error) {
@@ -591,7 +643,6 @@ async function getAaveData(walletAddress, chain) {
         return null;
     }
 }
-
 
 async function generateSnapshotImage(data) {
     const width = 720;
