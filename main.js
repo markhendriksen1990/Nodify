@@ -461,11 +461,11 @@ async function getFormattedPositionData(allPositionsData, chain) {
         return ``; 
     }
     
-    let chainReport = `\n*-------------- ${chain.toUpperCase()} --------------*\n`;
+    let chainReport = "";
     
     for (const data of allPositionsData) {
         let currentPositionMessage = "";
-        currentPositionMessage += `\n-------------- Position #${data.i.toString()} --------------\n`;
+        currentPositionMessage += `\n---------- ${data.chain.toUpperCase()} -- Position #${data.i.toString()} ----------\n`;
         currentPositionMessage += `🔹 Token ID: \`${data.tokenId.toString()}\`\n`;
         currentPositionMessage += `🔸 Pool: ${data.t0.symbol}/${data.t1.symbol} (${Number(data.pos.fee)/10000}% fee)\n`;
 
@@ -711,6 +711,7 @@ async function handleSnapshotCommand(allPositionsData, chain, chatId) {
 
 // --- Telegram API Functions ---
 
+// ++ FIX: Restored the missing function definition ++
 async function setTelegramMenuCommands() {
     const telegramApiUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setMyCommands`;
     const commands = [
