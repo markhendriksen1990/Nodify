@@ -461,11 +461,11 @@ async function getFormattedPositionData(allPositionsData, chain) {
         return ``; 
     }
     
-    let chainReport = "";
+    let chainReport = `\n*-------------- ${chain.toUpperCase()} --------------*\n`;
     
     for (const data of allPositionsData) {
         let currentPositionMessage = "";
-        currentPositionMessage += `\n---------- ${data.chain.toUpperCase()} -- Position #${data.i.toString()} ----------\n`;
+        currentPositionMessage += `\n-------------- Position #${data.i.toString()} --------------\n`;
         currentPositionMessage += `🔹 Token ID: \`${data.tokenId.toString()}\`\n`;
         currentPositionMessage += `🔸 Pool: ${data.t0.symbol}/${data.t1.symbol} (${Number(data.pos.fee)/10000}% fee)\n`;
 
@@ -554,6 +554,42 @@ async function getFormattedPositionData(allPositionsData, chain) {
     }
 
     return chainReport;
+}
+
+// ++ NEW: Aave Data Fetching and Formatting Logic ++
+async function getAaveData(walletAddress, chain) {
+    const chainConfig = chains[chain]?.aave;
+    if (!chainConfig) {
+        return null;
+    }
+    const provider = new ethers.JsonRpcProvider(chains[chain].rpcUrl);
+
+    try {
+        const pool = new ethers.Contract(chainConfig.poolAddress, aavePoolAbi, provider);
+        const accountData = await pool.getUserAccountData(walletAddress);
+        
+        // ++ FIX: Check for collateral instead of debt ++
+        if (accountData.totalCollateralBase.toString() === '0') {
+            return null; // No Aave position
+        }
+        
+        const healthFactor = parseFloat(formatUnits(accountData.healthFactor, 18));
+        let healthStatus = "Safe";
+        if (healthFactor < 1.5) healthStatus = "Careful";
+        if (healthFactor < 1.1) healthStatus = "DANGER";
+        
+        return {
+            totalCollateral: `$${parseFloat(formatUnits(accountData.totalCollateralBase, 8)).toFixed(2)}`,
+            totalDebt: `$${parseFloat(formatUnits(accountData.totalDebtBase, 8)).toFixed(2)}`,
+            healthFactor: `${healthFactor.toFixed(2)} - ${healthStatus}`,
+            borrowedAssets: "Note: Borrowed asset details require event scanning.",
+            lendingCosts: "Note: Lending cost calculation requires event scanning."
+        };
+
+    } catch (error) {
+        console.error(`Error fetching Aave data on ${chain}:`, error);
+        return null;
+    }
 }
 
 
@@ -734,7 +770,12 @@ async function processTelegramCommand(update) {
                 await sendMessage(chatId, `Searching for positions on: *${chainsToQuery.join(', ')}*... This may take a moment.`);
                 await sendChatAction(chatId, 'typing');
                 
-                const promises = chainsToQuery.map(chain => getPositionsData(myAddress, chain).then(data => ({ chain, data, status: 'fulfilled' })).catch(error => ({ chain, error, status: 'rejected' })));
+                const promises = chainsToQuery.map(async (chain) => {
+                    const uniPromise = getPositionsData(myAddress, chain).catch(e => ({ error: e, type: 'uniswap' }));
+                    const aavePromise = getAaveData(myAddress, chain).catch(e => ({ error: e, type: 'aave' }));
+                    return { chain, uniData: await uniPromise, aaveData: await aavePromise };
+                });
+                
                 const results = await Promise.all(promises);
 
                 let allChainMessages = "";
@@ -743,11 +784,22 @@ async function processTelegramCommand(update) {
                 let grandOverallData = { totalFeeUSD: 0, startPrincipalUSD: null, startDate: null, totalPortfolioPrincipalUSD: 0, totalPositions: 0 };
                 
                 for (const result of results) {
-                    if (result.status === 'fulfilled' && result.data.length > 0) {
-                        successfulChains++;
-                        allChainMessages += await getFormattedPositionData(result.data, result.chain);
+                    if ((result.uniData?.error) || (result.aaveData?.error)) {
+                        failedChains.push(result.chain);
+                        if(result.uniData?.error) console.error(`Failed to fetch Uniswap data for ${result.chain}:`, result.uniData.error);
+                        if(result.aaveData?.error) console.error(`Failed to fetch Aave data for ${result.chain}:`, result.aaveData.error);
+                        continue;
+                    }
+                    
+                    if (result.uniData.length > 0 || result.aaveData) {
+                         successfulChains++;
+                    }
+
+                    let chainMessage = "";
+                    if(result.uniData.length > 0) {
+                        chainMessage += await getFormattedPositionData(result.uniData, result.chain);
                         
-                        for (const posData of result.data) {
+                        for (const posData of result.uniData) {
                             if (posData.positionHistoryAnalysisSucceeded) {
                                 if (!grandOverallData.startDate || posData.currentPositionStartDate.getTime() < grandOverallData.startDate.getTime()) {
                                     grandOverallData.startDate = posData.currentPositionStartDate;
@@ -762,15 +814,21 @@ async function processTelegramCommand(update) {
                             grandOverallData.totalFeeUSD += (feeUSD0 + feeUSD1);
                             grandOverallData.totalPositions++;
                         }
-                    } else if (result.status === 'rejected') {
-                        failedChains.push(result.chain);
-                        console.error(`Failed to fetch data for ${result.chain}:`, result.error);
                     }
+                    if(result.aaveData) {
+                        chainMessage += `\n-------------- Aave Lending (${result.chain.toUpperCase()}) --------------\n`;
+                        chainMessage += `Total Collateral: ${result.aaveData.totalCollateral}  Total Debt: ${result.aaveData.totalDebt}\n`;
+                        chainMessage += `Health Factor: ${result.aaveData.healthFactor}\n`;
+                        chainMessage += `Borrowed Assets: ${result.aaveData.borrowedAssets}\n`;
+                        chainMessage += `Actual lending costs: ${result.aaveData.lendingCosts}\n`;
+                    }
+                    allChainMessages += chainMessage;
                 }
                 
-                let finalMessage = "";
+                let finalMessage = `*👜 Wallet: ${myAddress.substring(0, 6)}...${myAddress.substring(38)}*\n`;
+                
                 if (allChainMessages) {
-                    finalMessage = `*👜 Wallet: ${myAddress.substring(0, 6)}...${myAddress.substring(38)}*\n` + allChainMessages;
+                    finalMessage += allChainMessages;
                     
                     if (grandOverallData.startDate && grandOverallData.startPrincipalUSD !== null) {
                         const totalReturn = grandOverallData.totalPortfolioPrincipalUSD - grandOverallData.startPrincipalUSD;
@@ -778,7 +836,7 @@ async function processTelegramCommand(update) {
                         const feesAPR = (grandOverallData.totalFeeUSD / grandOverallData.startPrincipalUSD) * (365.25 * 24 * 60 * 60 * 1000 / (new Date() - grandOverallData.startDate)) * 100;
 
                         finalMessage += `\n====== OVERALL PERFORMANCE ======\n`;
-                        finalMessage += `(Based on the *${grandOverallData.totalPositions}* displayed position(s))\n`;
+                        finalMessage += `(Based on the *${grandOverallData.totalPositions}* displayed Uniswap position(s))\n`;
                         finalMessage += `🏛 Initial Investment: $${grandOverallData.startPrincipalUSD.toFixed(2)}\n`;
                         finalMessage += `🏛 Total Holdings: $${grandOverallData.totalPortfolioPrincipalUSD.toFixed(2)}\n`;
                         finalMessage += `📈 Holdings Change: $${totalReturn.toFixed(2)} (${totalReturnPercent.toFixed(2)}%)\n`;
@@ -793,7 +851,7 @@ async function processTelegramCommand(update) {
                 }
                 
                 if (successfulChains === 0 && failedChains.length === 0) {
-                    finalMessage = "No active Uniswap V3 positions found on any of the queried chains.";
+                    finalMessage = "No active Uniswap V3 or Aave positions found on any of the queried chains.";
                 } else if (failedChains.length > 0) {
                     finalMessage += `\n\n⚠️ Could not fetch data for the following chains: *${failedChains.join(', ')}*.`;
                 }
@@ -829,16 +887,16 @@ async function processTelegramCommand(update) {
                 }
 
             } else if (command === '/start') {
-                const startMessage = `Welcome! I am a Uniswap V3 LP Position tracker.\n\n` +
+                const startMessage = `Welcome! I am a Uniswap V3 & Aave V3 tracker.\n\n` +
                                      `Here are the available commands:\n` +
-                                     `*/positions [chain]* - Get a detailed text summary.\n` +
-                                     `*/snapshot [chain]* - Receive an image snapshot.\n\n` +
-                                     `If you don't specify a chain, the bot will search on all supported chains.\n\n`+
+                                     `*/positions [chain]* - Get a detailed summary.\n` +
+                                     `*/snapshot [chain]* - Get an image snapshot (Uniswap only).\n\n` +
+                                     `If you don't specify a chain, I will search all supported chains.\n\n` +
                                      `*Supported Chains:*\n` +
                                      Object.keys(chains).join(', ');
                 await sendMessage(chatId, startMessage);
             } else {
-                await sendMessage(chatId, "I received your message, but I only understand the /positions and /snapshot commands. Please select one from the menu.");
+                await sendMessage(chatId, "I only understand the /positions and /snapshot commands.");
             }
         } catch (error) {
             console.error("Error in processTelegramCommand:", error);
