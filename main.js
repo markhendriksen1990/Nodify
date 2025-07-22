@@ -410,11 +410,12 @@ async function getFormattedPositionData(allPositionsData, chain) {
         return ``; 
     }
     
-    let chainReport = `\n*-------------- ${chain.toUpperCase()} --------------*\n`;
+    let chainReport = "";
     
     for (const data of allPositionsData) {
         let currentPositionMessage = "";
-        currentPositionMessage += `\n-------------- Position #${data.i.toString()} --------------\n`;
+        // ++ CHANGE: Updated header format ++
+        currentPositionMessage += `\n---------- ${data.chain.toUpperCase()} -- Position #${data.i.toString()} ----------\n`;
         currentPositionMessage += `🔹 Token ID: \`${data.tokenId.toString()}\`\n`;
         currentPositionMessage += `🔸 Pool: ${data.t0.symbol}/${data.t1.symbol} (${Number(data.pos.fee)/10000}% fee)\n`;
 
@@ -616,7 +617,6 @@ async function handleSnapshotCommand(allPositionsData, chain, chatId) {
         };
         
         const imageBuffer = await generateSnapshotImage(snapshotData);
-        // ++ FIX: Pass the correct chatId to the sendPhoto function ++
         await sendPhoto(chatId, imageBuffer, `Position on ${chain}`);
     }
 }
@@ -692,12 +692,37 @@ async function processTelegramCommand(update) {
                 let failedChains = [];
                 
                 let allChainMessages = "";
+                // ++ FIX: Initialize a global data object for the overall summary ++
+                let grandOverallData = {
+                    totalFeeUSD: 0,
+                    startPrincipalUSD: null,
+                    startDate: null,
+                    totalPortfolioPrincipalUSD: 0,
+                    totalPositions: 0
+                };
                 
                 for (const result of results) {
                     if (result.status === 'fulfilled' && result.data.length > 0) {
                         successfulResults.push(result);
                         if (command === '/positions') {
                             allChainMessages += await getFormattedPositionData(result.data, result.chain);
+                            
+                            // ++ FIX: Aggregate data for the overall summary ++
+                            for (const posData of result.data) {
+                                if (posData.positionHistoryAnalysisSucceeded) {
+                                    if (!grandOverallData.startDate || posData.currentPositionStartDate.getTime() < grandOverallData.startDate.getTime()) {
+                                        grandOverallData.startDate = posData.currentPositionStartDate;
+                                        grandOverallData.startPrincipalUSD = posData.currentPositionInitialPrincipalUSD;
+                                    }
+                                }
+                                const principalUSD = (posData.amt0 * posData.prices.WETH) + (posData.amt1 * posData.prices.USDC);
+                                const feeUSD0 = posData.fee0 * (posData.t0.symbol.toUpperCase() === "WETH" ? posData.prices.WETH : posData.prices.USDC);
+                                const feeUSD1 = posData.fee1 * (posData.t1.symbol.toUpperCase() === "WETH" ? posData.prices.WETH : posData.prices.USDC);
+                                
+                                grandOverallData.totalPortfolioPrincipalUSD += principalUSD;
+                                grandOverallData.totalFeeUSD += (feeUSD0 + feeUSD1);
+                                grandOverallData.totalPositions++;
+                            }
                         }
                     } else if (result.status === 'rejected') {
                         failedChains.push(result.chain);
@@ -715,6 +740,29 @@ async function processTelegramCommand(update) {
                 if (command === '/positions') {
                      if (allChainMessages) {
                         finalMessage = `*👜 Wallet: ${myAddress.substring(0, 6)}...${myAddress.substring(38)}*\n\n` + allChainMessages;
+                        
+                        // ++ FIX: Add the restored overall performance section ++
+                        if (grandOverallData.startDate && grandOverallData.startPrincipalUSD !== null) {
+                            const now = new Date();
+                            const elapsedMs = now.getTime() - grandOverallData.startDate.getTime();
+                            const rewardsPerYear = elapsedMs > 0 ? grandOverallData.totalFeeUSD * (365.25 * 24 * 60 * 60 * 1000) / elapsedMs : 0;
+                            const totalReturn = grandOverallData.totalPortfolioPrincipalUSD - grandOverallData.startPrincipalUSD;
+                            const totalReturnPercent = (totalReturn / grandOverallData.startPrincipalUSD) * 100;
+                            const feesAPR = (rewardsPerYear / grandOverallData.startPrincipalUSD) * 100;
+
+                            finalMessage += `\n====== OVERALL PERFORMANCE ======\n`;
+                            finalMessage += `(Based on the *${grandOverallData.totalPositions}* displayed position(s))\n`;
+                            finalMessage += `🏛 Initial Investment: $${grandOverallData.startPrincipalUSD.toFixed(2)}\n`;
+                            finalMessage += `🏛 Total Holdings: $${grandOverallData.totalPortfolioPrincipalUSD.toFixed(2)}\n`;
+                            finalMessage += `📈 Holdings Change: $${totalReturn.toFixed(2)} (${totalReturnPercent.toFixed(2)}%)\n`;
+
+                            finalMessage += `\n*Fee Performance*\n`;
+                            finalMessage += `💰 Total Fees Earned: $${grandOverallData.totalFeeUSD.toFixed(2)}\n`;
+                            finalMessage += `💰 Fees APR: ${feesAPR.toFixed(2)}%\n`;
+
+                            const allTimeGains = totalReturn + grandOverallData.totalFeeUSD;
+                            finalMessage += `\n📈 Total return + Fees: $${allTimeGains.toFixed(2)}\n`;
+                        }
                     }
                 }
                 
