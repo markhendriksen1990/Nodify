@@ -407,7 +407,7 @@ async function getPositionsData(walletAddress, chain) {
 
 async function getFormattedPositionData(allPositionsData, chain) {
     if (allPositionsData.length === 0) {
-        return ``; // Return empty string to be handled by the caller
+        return ``; 
     }
     
     let chainReport = `\n*-------------- ${chain.toUpperCase()} --------------*\n`;
@@ -498,7 +498,7 @@ async function getFormattedPositionData(allPositionsData, chain) {
         if (data.positionHistoryAnalysisSucceeded) {
             currentPositionMessage += `📈 Position Total return + Fees: $${positionTotalGains.toFixed(2)}\n`;
         }
-
+        
         chainReport += currentPositionMessage;
     }
 
@@ -572,9 +572,9 @@ async function generateSnapshotImage(data) {
     return canvas.toBuffer('image/png');
 }
 
-async function handleSnapshotCommand(allPositionsData, chain) {
+async function handleSnapshotCommand(allPositionsData, chain, chatId) {
     if (allPositionsData.length === 0) {
-        return; // No positions, do nothing
+        return; 
     }
 
     for (const data of allPositionsData) {
@@ -616,7 +616,8 @@ async function handleSnapshotCommand(allPositionsData, chain) {
         };
         
         const imageBuffer = await generateSnapshotImage(snapshotData);
-        await sendPhoto(CHAT_ID, imageBuffer, `Position on ${chain}`);
+        // ++ FIX: Pass the correct chatId to the sendPhoto function ++
+        await sendPhoto(chatId, imageBuffer, `Position on ${chain}`);
     }
 }
 
@@ -706,7 +707,7 @@ async function processTelegramCommand(update) {
                 
                 if (command === '/snapshot') {
                     for (const result of successfulResults) {
-                         await handleSnapshotCommand(result.data, result.chain);
+                         await handleSnapshotCommand(result.data, result.chain, chatId);
                     }
                 }
                 
@@ -732,7 +733,7 @@ async function processTelegramCommand(update) {
                                      `Here are the available commands:\n` +
                                      `*/positions [chain]* - Get a detailed text summary.\n` +
                                      `*/snapshot [chain]* - Receive an image snapshot.\n\n` +
-                                     `If you don't specify a chain, the bot will search on all supported chains.\n\n` +
+                                     `If you don't specify a chain, the bot will search on all supported chains.\n\n`+
                                      `*Supported Chains:*\n` +
                                      Object.keys(chains).join(', ');
                 await sendMessage(chatId, startMessage);
