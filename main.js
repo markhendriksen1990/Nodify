@@ -556,13 +556,51 @@ async function getFormattedPositionData(allPositionsData, chain) {
     return chainReport;
 }
 
-// ++ NEW: Helper function to find Aave Borrow events ++
+// ++ NEW: Helper function to find Aave Borrow events with chunking and retries ++
 async function getAaveBorrowEvents(pool, provider, userAddress) {
-    // ++ FIX: Filter by the indexed 'onBehalfOf' parameter (the third argument) ++
+    const latestBlock = await provider.getBlockNumber();
     const borrowFilter = pool.filters.Borrow(null, null, userAddress);
-    const events = await pool.queryFilter(borrowFilter, 0, 'latest');
+    let events = [];
+    
+    let fromBlock = 0;
+    const initialWindow = 49999;
+
+    while (fromBlock <= latestBlock) {
+        let toBlock = fromBlock + initialWindow;
+        if (toBlock > latestBlock) {
+            toBlock = latestBlock;
+        }
+
+        let success = false;
+        for (let attempt = 1; attempt <= 5; attempt++) {
+            try {
+                const newEvents = await pool.queryFilter(borrowFilter, fromBlock, toBlock);
+                events = events.concat(newEvents);
+                success = true;
+                break;
+            } catch (e) {
+                const errorMessage = e.message || "";
+                if (errorMessage.includes("block range") || errorMessage.includes("exceed maximum")) {
+                     const smallerWindow = Math.floor((toBlock - fromBlock) / 2);
+                     toBlock = fromBlock + smallerWindow;
+                     console.warn(`Aave event scan failed (Attempt ${attempt}): Range too large. Retrying with window size ${smallerWindow}.`);
+                     await new Promise(res => setTimeout(res, 500 * attempt));
+                } else {
+                    console.error(`Unrecoverable error fetching Aave borrow events:`, e);
+                    throw e; // Rethrow if it's not a block range issue
+                }
+            }
+        }
+        
+        if (!success) {
+             console.error(`Failed to fetch Aave events for range ${fromBlock}-${toBlock} after multiple retries.`);
+        }
+
+        fromBlock = toBlock + 1;
+    }
     return events;
 }
+
 
 // ++ NEW: Aave Data Fetching and Formatting Logic ++
 async function getAaveData(walletAddress, chain) {
@@ -602,7 +640,7 @@ async function getAaveData(walletAddress, chain) {
                     if (!borrowedAssets[reserveAddress]) {
                         const tokenMeta = await getTokenMeta(reserveAddress, provider);
                         const reserveData = await dataProvider.getReserveData(reserveAddress);
-                        const variableBorrowRate = reserveData[5]; // variableBorrowRate is at index 5
+                        const variableBorrowRate = reserveData[5]; 
                         const borrowAPY = parseFloat(formatUnits(variableBorrowRate, 27)) * 100;
                         borrowedAssets[reserveAddress] = { ...tokenMeta, borrowAPY, principal: 0n };
                     }
@@ -619,7 +657,7 @@ async function getAaveData(walletAddress, chain) {
                     const asset = borrowedAssets[address];
                     const principalAmount = parseFloat(formatUnits(asset.principal, asset.decimals));
                     const dayStr = new Date(earliestBorrowTimestamp).toLocaleDateString('en-GB').replace(/\//g, '-');
-                    const histPrice = await fetchHistoricalPrice(asset.symbol.toLowerCase(), dayStr);
+                    const histPrice = await fetchHistoricalPrice(asset.symbol.toLowerCase().replace(/\.e$/, ''), dayStr); // Handle .e bridged assets
                     const principalValueUSD = principalAmount * histPrice;
 
                     totalPrincipalBorrowedUSD += principalValueUSD;
@@ -646,72 +684,6 @@ async function getAaveData(walletAddress, chain) {
         console.error(`Error fetching Aave data on ${chain}:`, error);
         return null;
     }
-}
-
-async function generateSnapshotImage(data) {
-    const width = 720;
-    const height = 1280;
-    const canvas = createCanvas(width, height);
-    const ctx = canvas.getContext('2d');
-
-    try {
-        if (fs.existsSync('background.jpg')) {
-            const background = await loadImage('background.jpg');
-            ctx.drawImage(background, 0, 0, width, height);
-        } else {
-            ctx.fillStyle = '#1a202c';
-            ctx.fillRect(0, 0, width, height);
-        }
-    } catch (e) {
-        console.error("Could not load background image:", e);
-        ctx.fillStyle = '#1a202c';
-        ctx.fillRect(0, 0, width, height);
-    }
-
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
-    ctx.fillRect(50, 200, width - 100, 600);
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(50, 200, width - 100, 600);
-
-
-    ctx.fillStyle = '#FFFFFF';
-    ctx.textAlign = 'center';
-    
-    ctx.font = '40px Roboto';
-    ctx.fillText(`${data.pair} ${data.feeTier}`, width / 2, 260);
-    ctx.font = '30px Roboto';
-    ctx.fillText(`${data.timestamp}`, width / 2, 300);
-
-    ctx.font = '32px Roboto';
-    ctx.textAlign = 'left';
-
-    const drawLine = (label, value, y) => {
-        ctx.fillStyle = '#cccccc';
-        ctx.fillText(label, 70, y);
-        ctx.fillStyle = '#FFFFFF';
-        ctx.textAlign = 'right';
-        ctx.fillText(value, width - 70, y);
-        ctx.textAlign = 'left';
-    };
-    
-    const holdingsChangeColor = data.holdingsChange.startsWith('-') ? '#FF6B6B' : '#63FF84';
-
-    drawLine("Current Value:", data.currentValue, 380);
-    
-    ctx.fillStyle = '#cccccc';
-    ctx.fillText("Holdings Change:", 70, 440);
-    ctx.fillStyle = holdingsChangeColor;
-    ctx.textAlign = 'right';
-    ctx.fillText(data.holdingsChange, width - 70, 440);
-    ctx.textAlign = 'left';
-
-    drawLine(`Uncollected ${data.t0Symbol}:`, data.fees0, 530);
-    drawLine(`Uncollected ${data.t1Symbol}:`, data.fees1, 590);
-    drawLine("Total Fees:", data.totalFees, 650);
-    drawLine("Fees APR:", data.feesAPR, 710);
-
-    return canvas.toBuffer('image/png');
 }
 
 async function handleSnapshotCommand(allPositionsData, chain, chatId) {
