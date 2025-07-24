@@ -609,60 +609,49 @@ async function getAaveData(walletAddress, chain) {
         const dataProvider = new ethers.Contract(chainConfig.dataProviderAddress.toLowerCase(), aaveDataProviderAbi, provider);
         const accountData = await pool.getUserAccountData(walletAddress);
 
-        if (accountData.totalCollateralBase.toString() === '0') {
-            return null; // No Aave position
+        if (accountData.totalDebtBase.toString() === '0') {
+            return null; // No debt on this chain, so we can skip it.
         }
 
         const healthFactor = parseFloat(formatUnits(accountData.healthFactor, 18));
         let healthStatus = "Safe";
         if (healthFactor < 1.5) healthStatus = "Careful";
         if (healthFactor < 1.1) healthStatus = "DANGER";
+        
+        const allReserves = await dataProvider.getAllReservesTokens();
+        let borrowedAssetDetails = [];
 
-        let borrowedAssetsString = "None";
-        let lendingCostsString = "$0.00 over 0 days";
+        for (const reserve of allReserves) {
+            try {
+                const userReserveData = await dataProvider.getUserReserveData(reserve.tokenAddress, walletAddress);
+                
+                const stableDebt = userReserveData.currentStableDebt;
+                const variableDebt = userReserveData.currentVariableDebt;
 
-        if (accountData.totalDebtBase.toString() > '0') {
-            const borrowEvents = await getAaveBorrowEvents(pool, provider, walletAddress);
-            
-            if (borrowEvents.length > 0) {
-                const borrowedAssets = {};
-                let earliestBorrowTimestamp = Date.now();
-                let totalPrincipalBorrowedUSD = 0;
-
-                for (const event of borrowEvents) {
-                    const reserveAddress = event.args.reserve;
-                    if (!borrowedAssets[reserveAddress]) {
-                        const tokenMeta = await getTokenMeta(reserveAddress, provider);
-                        const reserveData = await dataProvider.getReserveData(reserveAddress);
-                        const variableBorrowRate = reserveData[5]; 
-                        const borrowAPY = parseFloat(formatUnits(variableBorrowRate, 27)) * 100;
-                        borrowedAssets[reserveAddress] = { ...tokenMeta, borrowAPY, principal: 0n };
-                    }
-                    borrowedAssets[reserveAddress].principal += event.args.amount;
+                const currentDebt = stableDebt > variableDebt ? stableDebt : variableDebt;
+                const debtType = stableDebt > variableDebt ? 'Stable' : 'Variable';
+                
+                if (currentDebt > 0n) {
+                    const reserveAssetContract = new ethers.Contract(reserve.tokenAddress, erc20Abi, provider);
+                    const decimals = await reserveAssetContract.decimals();
+                    const formattedDebt = Number(ethers.formatUnits(currentDebt, decimals));
                     
-                    const block = await provider.getBlock(event.blockNumber);
-                    if (block.timestamp * 1000 < earliestBorrowTimestamp) {
-                        earliestBorrowTimestamp = block.timestamp * 1000;
+                    let apy = 'N/A';
+                    try {
+                        const reserveData = await pool.getReserveData(reserve.tokenAddress);
+                        const borrowRate = debtType === 'Stable' 
+                            ? reserveData.currentStableBorrowRate 
+                            : reserveData.currentVariableBorrowRate;
+                        
+                        apy = Number(ethers.formatUnits(borrowRate, 25)).toFixed(2);
+                    } catch (e) {
+                        console.error(`--> Could not fetch APY for ${reserve.symbol}:`, e.message);
                     }
-                }
-                
-                let borrowedAssetDetails = [];
-                for(const address in borrowedAssets) {
-                    const asset = borrowedAssets[address];
-                    const principalAmount = parseFloat(formatUnits(asset.principal, asset.decimals));
-                    const dayStr = new Date(earliestBorrowTimestamp).toLocaleDateString('en-GB').replace(/\//g, '-');
-                    const histPrice = await fetchHistoricalPrice(asset.symbol.toLowerCase().replace(/\.e$/, ''), dayStr);
-                    const principalValueUSD = principalAmount * histPrice;
 
-                    totalPrincipalBorrowedUSD += principalValueUSD;
-                    borrowedAssetDetails.push(`${asset.symbol}: $${principalValueUSD.toFixed(2)} at ${asset.borrowAPY.toFixed(2)}% APY`);
+                    borrowedAssetDetails.push(`• ${reserve.symbol}: $${formattedDebt.toFixed(2)} at ${apy}% APY (${debtType} rate)`);
                 }
-                borrowedAssetsString = borrowedAssetDetails.join(', ');
-                
-                const totalDebtUSD = parseFloat(formatUnits(accountData.totalDebtBase, 8));
-                const interestAccrued = totalDebtUSD - totalPrincipalBorrowedUSD;
-                const loanDuration = Date.now() - earliestBorrowTimestamp;
-                lendingCostsString = `$${interestAccrued.toFixed(2)} over ${formatElapsedDaysHours(loanDuration)}`;
+            } catch (assetError) {
+                // This will catch errors for a specific asset without stopping the whole script
             }
         }
 
@@ -671,7 +660,7 @@ async function getAaveData(walletAddress, chain) {
             totalDebt: `$${parseFloat(formatUnits(accountData.totalDebtBase, 8)).toFixed(2)}`,
             healthFactor: `${healthFactor.toFixed(2)} - ${healthStatus}`,
             borrowedAssets: borrowedAssetsString,
-            lendingCosts: lendingCostsString
+            lendingCosts: "Note: Lending cost calculation is a future feature."
         };
 
     } catch (error) {
