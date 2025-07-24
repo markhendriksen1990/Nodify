@@ -15,7 +15,8 @@
     "@uniswap/sdk-core": "latest",
     "jsbi": "latest",
     "canvas": "^x.x.x",
-    "form-data": "^x.x.x"  
+    "form-data": "^x.x.x",
+    "@aave/core-v3": "^x.x.x"
   },
   "keywords": [],
   "author": "",
