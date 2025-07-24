@@ -8,7 +8,6 @@ const { createCanvas, loadImage, registerFont } = require('canvas');
 const FormData = require('form-data');
 const fs = require('fs');
 const path = require('path');
-// ++ NEW: Import Aave ABIs ++
 const { abi: aavePoolAbi } = require('@aave/core-v3/artifacts/contracts/protocol/pool/Pool.sol/Pool.json');
 const { abi: aaveDataProviderAbi } = require('@aave/core-v3/artifacts/contracts/misc/AaveProtocolDataProvider.sol/AaveProtocolDataProvider.json');
 
@@ -551,4 +550,4 @@ async function getFormattedPositionData(allPositionsData, chain) {
     return chainReport;
 }
 
-// ... (Rest of your existing code)
+// ... (Rest of your existing code from the previous turn)
