@@ -558,7 +558,7 @@ async function getAaveBorrowEvents(pool, provider, userAddress) {
     let events = [];
     
     let fromBlock = 0;
-    const initialWindow = 50000;
+    const initialWindow = 49999; // Adjusted to be safe for most public RPCs
 
     while (fromBlock <= latestBlock) {
         let toBlock = fromBlock + initialWindow;
@@ -596,6 +596,7 @@ async function getAaveBorrowEvents(pool, provider, userAddress) {
     return events;
 }
 
+
 async function getAaveData(walletAddress, chain) {
     const chainConfig = chains[chain]?.aave;
     if (!chainConfig) {
@@ -604,8 +605,8 @@ async function getAaveData(walletAddress, chain) {
     const provider = new ethers.JsonRpcProvider(chains[chain].rpcUrl);
 
     try {
-        const pool = new ethers.Contract(chainConfig.poolAddress, aavePoolAbi, provider);
-        const dataProvider = new ethers.Contract(chainConfig.dataProviderAddress, aaveDataProviderAbi, provider);
+        const pool = new ethers.Contract(chainConfig.poolAddress.toLowerCase(), aavePoolAbi, provider);
+        const dataProvider = new ethers.Contract(chainConfig.dataProviderAddress.toLowerCase(), aaveDataProviderAbi, provider);
         const accountData = await pool.getUserAccountData(walletAddress);
 
         if (accountData.totalCollateralBase.toString() === '0') {
