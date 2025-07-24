@@ -596,7 +596,6 @@ async function getAaveBorrowEvents(pool, provider, userAddress) {
     return events;
 }
 
-
 async function getAaveData(walletAddress, chain) {
     const chainConfig = chains[chain]?.aave;
     if (!chainConfig) {
@@ -609,9 +608,8 @@ async function getAaveData(walletAddress, chain) {
         const dataProvider = new ethers.Contract(chainConfig.dataProviderAddress.toLowerCase(), aaveDataProviderAbi, provider);
         const accountData = await pool.getUserAccountData(walletAddress);
 
-        // An Aave position exists if there is either collateral or debt.
-        if (accountData.totalCollateralBase.toString() === '0' && accountData.totalDebtBase.toString() === '0') {
-            return null;
+        if (accountData.totalCollateralBase.toString() === '0') {
+            return null; // No Aave position
         }
 
         const healthFactor = parseFloat(formatUnits(accountData.healthFactor, 18));
@@ -620,18 +618,18 @@ async function getAaveData(walletAddress, chain) {
         if (healthFactor < 1.1) healthStatus = "DANGER";
 
         let borrowedAssetsString = "None";
-        
+        let lendingCostsString = "$0.00 over 0 days";
+
         if (accountData.totalDebtBase.toString() > '0') {
+            // Get current borrow details using the reliable method from your test script
             const allReserves = await dataProvider.getAllReservesTokens();
             let borrowedAssetDetails = [];
 
             for (const reserve of allReserves) {
                 try {
                     const userReserveData = await dataProvider.getUserReserveData(reserve.tokenAddress, walletAddress);
-                    
                     const stableDebt = userReserveData.currentStableDebt;
                     const variableDebt = userReserveData.currentVariableDebt;
-
                     const currentDebt = stableDebt > variableDebt ? stableDebt : variableDebt;
                     const debtType = stableDebt > variableDebt ? 'Stable' : 'Variable';
                     
@@ -658,9 +656,44 @@ async function getAaveData(walletAddress, chain) {
                     // This will catch errors for a specific asset without stopping the whole script
                 }
             }
-
-            if (borrowedAssetDetails.length > 0) {
+             if (borrowedAssetDetails.length > 0) {
                 borrowedAssetsString = borrowedAssetDetails.join('\n');
+            }
+
+
+            // Calculate historical costs
+            const borrowEvents = await getAaveBorrowEvents(pool, provider, walletAddress);
+            if (borrowEvents.length > 0) {
+                let earliestBorrowTimestamp = Date.now();
+                let totalPrincipalBorrowedUSD = 0;
+                const borrowedAssetsMap = {};
+
+                for (const event of borrowEvents) {
+                    const reserveAddress = event.args.reserve;
+                    if (!borrowedAssetsMap[reserveAddress]) {
+                        borrowedAssetsMap[reserveAddress] = { principal: 0n };
+                    }
+                    borrowedAssetsMap[reserveAddress].principal += event.args.amount;
+                    
+                    const block = await provider.getBlock(event.blockNumber);
+                    if (block.timestamp * 1000 < earliestBorrowTimestamp) {
+                        earliestBorrowTimestamp = block.timestamp * 1000;
+                    }
+                }
+                
+                for(const address in borrowedAssetsMap) {
+                    const asset = borrowedAssetsMap[address];
+                    const tokenMeta = await getTokenMeta(address, provider);
+                    const principalAmount = parseFloat(formatUnits(asset.principal, tokenMeta.decimals));
+                    const dayStr = new Date(earliestBorrowTimestamp).toLocaleDateString('en-GB').replace(/\//g, '-');
+                    const histPrice = await fetchHistoricalPrice(tokenMeta.symbol.toLowerCase().replace(/\.e$/, ''), dayStr);
+                    totalPrincipalBorrowedUSD += principalAmount * histPrice;
+                }
+                
+                const totalDebtUSD = parseFloat(formatUnits(accountData.totalDebtBase, 8));
+                const interestAccrued = totalDebtUSD - totalPrincipalBorrowedUSD;
+                const loanDuration = Date.now() - earliestBorrowTimestamp;
+                lendingCostsString = `$${interestAccrued.toFixed(2)} over ${formatElapsedDaysHours(loanDuration)}`;
             }
         }
 
@@ -669,7 +702,7 @@ async function getAaveData(walletAddress, chain) {
             totalDebt: `$${parseFloat(formatUnits(accountData.totalDebtBase, 8)).toFixed(2)}`,
             healthFactor: `${healthFactor.toFixed(2)} - ${healthStatus}`,
             borrowedAssets: borrowedAssetsString,
-            lendingCosts: "Note: Lending cost calculation is a future feature."
+            lendingCosts: lendingCostsString
         };
 
     } catch (error) {
