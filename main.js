@@ -550,6 +550,134 @@ async function getFormattedPositionData(allPositionsData, chain) {
     return chainReport;
 }
 
+// --- Aave-Specific Functions ---
+
+async function getAaveBorrowEvents(pool, provider, userAddress) {
+    const latestBlock = await provider.getBlockNumber();
+    const borrowFilter = pool.filters.Borrow(null, null, userAddress);
+    let events = [];
+    
+    let fromBlock = 0;
+    const initialWindow = 50000;
+
+    while (fromBlock <= latestBlock) {
+        let toBlock = fromBlock + initialWindow;
+        if (toBlock > latestBlock) {
+            toBlock = latestBlock;
+        }
+
+        let success = false;
+        for (let attempt = 1; attempt <= 5; attempt++) {
+            try {
+                const newEvents = await pool.queryFilter(borrowFilter, fromBlock, toBlock);
+                events = events.concat(newEvents);
+                success = true;
+                break;
+            } catch (e) {
+                const errorMessage = e.message || "";
+                if (errorMessage.includes("block range") || errorMessage.includes("exceed maximum")) {
+                     const smallerWindow = Math.floor((toBlock - fromBlock) / 2);
+                     toBlock = fromBlock + smallerWindow;
+                     console.warn(`Aave event scan failed (Attempt ${attempt}): Range too large. Retrying with window size ${smallerWindow}.`);
+                     await new Promise(res => setTimeout(res, 500 * attempt));
+                } else {
+                    console.error(`Unrecoverable error fetching Aave borrow events:`, e);
+                    throw e; 
+                }
+            }
+        }
+        
+        if (!success) {
+             console.error(`Failed to fetch Aave events for range ${fromBlock}-${toBlock} after multiple retries.`);
+        }
+
+        fromBlock = toBlock + 1;
+    }
+    return events;
+}
+
+async function getAaveData(walletAddress, chain) {
+    const chainConfig = chains[chain]?.aave;
+    if (!chainConfig) {
+        return null;
+    }
+    const provider = new ethers.JsonRpcProvider(chains[chain].rpcUrl);
+
+    try {
+        const pool = new ethers.Contract(chainConfig.poolAddress, aavePoolAbi, provider);
+        const dataProvider = new ethers.Contract(chainConfig.dataProviderAddress, aaveDataProviderAbi, provider);
+        const accountData = await pool.getUserAccountData(walletAddress);
+
+        if (accountData.totalCollateralBase.toString() === '0') {
+            return null; // No Aave position
+        }
+
+        const healthFactor = parseFloat(formatUnits(accountData.healthFactor, 18));
+        let healthStatus = "Safe";
+        if (healthFactor < 1.5) healthStatus = "Careful";
+        if (healthFactor < 1.1) healthStatus = "DANGER";
+
+        let borrowedAssetsString = "None";
+        let lendingCostsString = "$0.00 over 0 days";
+
+        if (accountData.totalDebtBase.toString() > '0') {
+            const borrowEvents = await getAaveBorrowEvents(pool, provider, walletAddress);
+            
+            if (borrowEvents.length > 0) {
+                const borrowedAssets = {};
+                let earliestBorrowTimestamp = Date.now();
+                let totalPrincipalBorrowedUSD = 0;
+
+                for (const event of borrowEvents) {
+                    const reserveAddress = event.args.reserve;
+                    if (!borrowedAssets[reserveAddress]) {
+                        const tokenMeta = await getTokenMeta(reserveAddress, provider);
+                        const reserveData = await dataProvider.getReserveData(reserveAddress);
+                        const variableBorrowRate = reserveData[5]; 
+                        const borrowAPY = parseFloat(formatUnits(variableBorrowRate, 27)) * 100;
+                        borrowedAssets[reserveAddress] = { ...tokenMeta, borrowAPY, principal: 0n };
+                    }
+                    borrowedAssets[reserveAddress].principal += event.args.amount;
+                    
+                    const block = await provider.getBlock(event.blockNumber);
+                    if (block.timestamp * 1000 < earliestBorrowTimestamp) {
+                        earliestBorrowTimestamp = block.timestamp * 1000;
+                    }
+                }
+                
+                let borrowedAssetDetails = [];
+                for(const address in borrowedAssets) {
+                    const asset = borrowedAssets[address];
+                    const principalAmount = parseFloat(formatUnits(asset.principal, asset.decimals));
+                    const dayStr = new Date(earliestBorrowTimestamp).toLocaleDateString('en-GB').replace(/\//g, '-');
+                    const histPrice = await fetchHistoricalPrice(asset.symbol.toLowerCase().replace(/\.e$/, ''), dayStr);
+                    const principalValueUSD = principalAmount * histPrice;
+
+                    totalPrincipalBorrowedUSD += principalValueUSD;
+                    borrowedAssetDetails.push(`${asset.symbol}: $${principalValueUSD.toFixed(2)} at ${asset.borrowAPY.toFixed(2)}% APY`);
+                }
+                borrowedAssetsString = borrowedAssetDetails.join(', ');
+                
+                const totalDebtUSD = parseFloat(formatUnits(accountData.totalDebtBase, 8));
+                const interestAccrued = totalDebtUSD - totalPrincipalBorrowedUSD;
+                const loanDuration = Date.now() - earliestBorrowTimestamp;
+                lendingCostsString = `$${interestAccrued.toFixed(2)} over ${formatElapsedDaysHours(loanDuration)}`;
+            }
+        }
+
+        return {
+            totalCollateral: `$${parseFloat(formatUnits(accountData.totalCollateralBase, 8)).toFixed(2)}`,
+            totalDebt: `$${parseFloat(formatUnits(accountData.totalDebtBase, 8)).toFixed(2)}`,
+            healthFactor: `${healthFactor.toFixed(2)} - ${healthStatus}`,
+            borrowedAssets: borrowedAssetsString,
+            lendingCosts: lendingCostsString
+        };
+
+    } catch (error) {
+        console.error(`Error fetching Aave data on ${chain}:`, error);
+        return null;
+    }
+}
 
 async function generateSnapshotImage(data) {
     const width = 720;
