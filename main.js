@@ -609,49 +609,58 @@ async function getAaveData(walletAddress, chain) {
         const dataProvider = new ethers.Contract(chainConfig.dataProviderAddress.toLowerCase(), aaveDataProviderAbi, provider);
         const accountData = await pool.getUserAccountData(walletAddress);
 
-        if (accountData.totalDebtBase.toString() === '0') {
-            return null; // No debt on this chain, so we can skip it.
+        // An Aave position exists if there is either collateral or debt.
+        if (accountData.totalCollateralBase.toString() === '0' && accountData.totalDebtBase.toString() === '0') {
+            return null;
         }
 
         const healthFactor = parseFloat(formatUnits(accountData.healthFactor, 18));
         let healthStatus = "Safe";
         if (healthFactor < 1.5) healthStatus = "Careful";
         if (healthFactor < 1.1) healthStatus = "DANGER";
+
+        let borrowedAssetsString = "None";
         
-        const allReserves = await dataProvider.getAllReservesTokens();
-        let borrowedAssetDetails = [];
+        if (accountData.totalDebtBase.toString() > '0') {
+            const allReserves = await dataProvider.getAllReservesTokens();
+            let borrowedAssetDetails = [];
 
-        for (const reserve of allReserves) {
-            try {
-                const userReserveData = await dataProvider.getUserReserveData(reserve.tokenAddress, walletAddress);
-                
-                const stableDebt = userReserveData.currentStableDebt;
-                const variableDebt = userReserveData.currentVariableDebt;
-
-                const currentDebt = stableDebt > variableDebt ? stableDebt : variableDebt;
-                const debtType = stableDebt > variableDebt ? 'Stable' : 'Variable';
-                
-                if (currentDebt > 0n) {
-                    const reserveAssetContract = new ethers.Contract(reserve.tokenAddress, erc20Abi, provider);
-                    const decimals = await reserveAssetContract.decimals();
-                    const formattedDebt = Number(ethers.formatUnits(currentDebt, decimals));
+            for (const reserve of allReserves) {
+                try {
+                    const userReserveData = await dataProvider.getUserReserveData(reserve.tokenAddress, walletAddress);
                     
-                    let apy = 'N/A';
-                    try {
-                        const reserveData = await pool.getReserveData(reserve.tokenAddress);
-                        const borrowRate = debtType === 'Stable' 
-                            ? reserveData.currentStableBorrowRate 
-                            : reserveData.currentVariableBorrowRate;
-                        
-                        apy = Number(ethers.formatUnits(borrowRate, 25)).toFixed(2);
-                    } catch (e) {
-                        console.error(`--> Could not fetch APY for ${reserve.symbol}:`, e.message);
-                    }
+                    const stableDebt = userReserveData.currentStableDebt;
+                    const variableDebt = userReserveData.currentVariableDebt;
 
-                    borrowedAssetDetails.push(`• ${reserve.symbol}: $${formattedDebt.toFixed(2)} at ${apy}% APY (${debtType} rate)`);
+                    const currentDebt = stableDebt > variableDebt ? stableDebt : variableDebt;
+                    const debtType = stableDebt > variableDebt ? 'Stable' : 'Variable';
+                    
+                    if (currentDebt > 0n) {
+                        const reserveAssetContract = new ethers.Contract(reserve.tokenAddress, erc20Abi, provider);
+                        const decimals = await reserveAssetContract.decimals();
+                        const formattedDebt = Number(ethers.formatUnits(currentDebt, decimals));
+                        
+                        let apy = 'N/A';
+                        try {
+                            const reserveData = await pool.getReserveData(reserve.tokenAddress);
+                            const borrowRate = debtType === 'Stable' 
+                                ? reserveData.currentStableBorrowRate 
+                                : reserveData.currentVariableBorrowRate;
+                            
+                            apy = Number(ethers.formatUnits(borrowRate, 25)).toFixed(2);
+                        } catch (e) {
+                            console.error(`--> Could not fetch APY for ${reserve.symbol}:`, e.message);
+                        }
+
+                        borrowedAssetDetails.push(`• ${reserve.symbol}: $${formattedDebt.toFixed(2)} at ${apy}% APY (${debtType} rate)`);
+                    }
+                } catch (assetError) {
+                    // This will catch errors for a specific asset without stopping the whole script
                 }
-            } catch (assetError) {
-                // This will catch errors for a specific asset without stopping the whole script
+            }
+
+            if (borrowedAssetDetails.length > 0) {
+                borrowedAssetsString = borrowedAssetDetails.join('\n');
             }
         }
 
