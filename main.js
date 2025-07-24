@@ -729,108 +729,133 @@ async function processTelegramCommand(update) {
                 if (command === '/positions') await sendChatAction(chatId, 'typing');
                 if (command === '/snapshot') await sendChatAction(chatId, 'upload_photo');
 
-                const promises = chainsToQuery.map(chain => getPositionsData(myAddress, chain).then(data => ({ chain, data, status: 'fulfilled' })).catch(error => ({ chain, error, status: 'rejected' })));
+                const promises = chainsToQuery.map(async (chain) => {
+                    const uniPromise = getPositionsData(myAddress, chain).catch(e => ({ error: e, type: 'uniswap' }));
+                    const aavePromise = getAaveData(myAddress, chain).catch(e => ({ error: e, type: 'aave' }));
+                    return { chain, uniData: await uniPromise, aaveData: await aavePromise };
+                });
+                
                 const results = await Promise.all(promises);
 
-                let successfulResults = [];
-                let failedChains = [];
-                
                 let allChainMessages = "";
-                // ++ FIX: Initialize a global data object for the overall summary ++
-                let grandOverallData = {
-                    totalFeeUSD: 0,
-                    startPrincipalUSD: null,
-                    startDate: null,
-                    totalPortfolioPrincipalUSD: 0,
-                    totalPositions: 0
-                };
+                let successfulChains = 0;
+                let failedChains = [];
+                let grandOverallData = { totalFeeUSD: 0, startPrincipalUSD: null, startDate: null, totalPortfolioPrincipalUSD: 0, totalPositions: 0 };
                 
                 for (const result of results) {
-                    if (result.status === 'fulfilled' && result.data.length > 0) {
-                        successfulResults.push(result);
-                        if (command === '/positions') {
-                            allChainMessages += await getFormattedPositionData(result.data, result.chain);
-                            
-                            // ++ FIX: Aggregate data for the overall summary ++
-                            for (const posData of result.data) {
-                                if (posData.positionHistoryAnalysisSucceeded) {
-                                    if (!grandOverallData.startDate || posData.currentPositionStartDate.getTime() < grandOverallData.startDate.getTime()) {
-                                        grandOverallData.startDate = posData.currentPositionStartDate;
-                                        grandOverallData.startPrincipalUSD = posData.currentPositionInitialPrincipalUSD;
-                                    }
-                                }
-                                const principalUSD = (posData.amt0 * posData.prices.WETH) + (posData.amt1 * posData.prices.USDC);
-                                const feeUSD0 = posData.fee0 * (posData.t0.symbol.toUpperCase() === "WETH" ? posData.prices.WETH : posData.prices.USDC);
-                                const feeUSD1 = posData.fee1 * (posData.t1.symbol.toUpperCase() === "WETH" ? posData.prices.WETH : posData.prices.USDC);
-                                
-                                grandOverallData.totalPortfolioPrincipalUSD += principalUSD;
-                                grandOverallData.totalFeeUSD += (feeUSD0 + feeUSD1);
-                                grandOverallData.totalPositions++;
-                            }
-                        }
-                    } else if (result.status === 'rejected') {
+                    if ((result.uniData?.error) || (result.aaveData?.error)) {
                         failedChains.push(result.chain);
-                        console.error(`Failed to fetch data for ${result.chain}:`, result.error);
+                        if(result.uniData?.error) console.error(`Failed to fetch Uniswap data for ${result.chain}:`, result.uniData.error);
+                        if(result.aaveData?.error) console.error(`Failed to fetch Aave data for ${result.chain}:`, result.aaveData.error);
+                        continue;
                     }
-                }
-                
-                if (command === '/snapshot') {
-                    for (const result of successfulResults) {
-                         await handleSnapshotCommand(result.data, result.chain, chatId);
+                    
+                    if (result.uniData.length > 0 || result.aaveData) {
+                         successfulChains++;
                     }
-                }
-                
-                let finalMessage = "";
-                if (command === '/positions') {
-                     if (allChainMessages) {
-                        finalMessage = `*👜 Wallet: ${myAddress.substring(0, 6)}...${myAddress.substring(38)}*\n\n` + allChainMessages;
+
+                    let chainMessage = "";
+                    if(result.uniData.length > 0) {
+                        chainMessage += await getFormattedPositionData(result.uniData, result.chain);
                         
-                        // ++ FIX: Add the restored overall performance section ++
-                        if (grandOverallData.startDate && grandOverallData.startPrincipalUSD !== null) {
-                            const now = new Date();
-                            const elapsedMs = now.getTime() - grandOverallData.startDate.getTime();
-                            const rewardsPerYear = elapsedMs > 0 ? grandOverallData.totalFeeUSD * (365.25 * 24 * 60 * 60 * 1000) / elapsedMs : 0;
-                            const totalReturn = grandOverallData.totalPortfolioPrincipalUSD - grandOverallData.startPrincipalUSD;
-                            const totalReturnPercent = (totalReturn / grandOverallData.startPrincipalUSD) * 100;
-                            const feesAPR = (rewardsPerYear / grandOverallData.startPrincipalUSD) * 100;
-
-                            finalMessage += `\n====== OVERALL PERFORMANCE ======\n`;
-                            finalMessage += `(Based on the *${grandOverallData.totalPositions}* displayed position(s))\n`;
-                            finalMessage += `🏛 Initial Investment: $${grandOverallData.startPrincipalUSD.toFixed(2)}\n`;
-                            finalMessage += `🏛 Total Holdings: $${grandOverallData.totalPortfolioPrincipalUSD.toFixed(2)}\n`;
-                            finalMessage += `📈 Holdings Change: $${totalReturn.toFixed(2)} (${totalReturnPercent.toFixed(2)}%)\n`;
-
-                            finalMessage += `\n*Fee Performance*\n`;
-                            finalMessage += `💰 Total Fees Earned: $${grandOverallData.totalFeeUSD.toFixed(2)}\n`;
-                            finalMessage += `💰 Fees APR: ${feesAPR.toFixed(2)}%\n`;
-
-                            const allTimeGains = totalReturn + grandOverallData.totalFeeUSD;
-                            finalMessage += `\n📈 Total return + Fees: $${allTimeGains.toFixed(2)}\n`;
+                        for (const posData of result.uniData) {
+                            if (posData.positionHistoryAnalysisSucceeded) {
+                                if (!grandOverallData.startDate || posData.currentPositionStartDate.getTime() < grandOverallData.startDate.getTime()) {
+                                    grandOverallData.startDate = posData.currentPositionStartDate;
+                                    grandOverallData.startPrincipalUSD = posData.currentPositionInitialPrincipalUSD;
+                                }
+                            }
+                            const principalUSD = (posData.amt0 * posData.prices.WETH) + (posData.amt1 * posData.prices.USDC);
+                            const feeUSD0 = posData.fee0 * (posData.t0.symbol.toUpperCase() === "WETH" ? posData.prices.WETH : posData.prices.USDC);
+                            const feeUSD1 = posData.fee1 * (posData.t1.symbol.toUpperCase() === "WETH" ? posData.prices.WETH : posData.prices.USDC);
+                            
+                            grandOverallData.totalPortfolioPrincipalUSD += principalUSD;
+                            grandOverallData.totalFeeUSD += (feeUSD0 + feeUSD1);
+                            grandOverallData.totalPositions++;
                         }
                     }
+                    if(result.aaveData) {
+                        chainMessage += `\n-------------- Aave Lending (${result.chain.toUpperCase()}) --------------\n`;
+                        chainMessage += `Total Collateral: ${result.aaveData.totalCollateral}  Total Debt: ${result.aaveData.totalDebt}\n`;
+                        chainMessage += `Health Factor: ${result.aaveData.healthFactor}\n`;
+                        chainMessage += `Borrowed Assets: ${result.aaveData.borrowedAssets}\n`;
+                        chainMessage += `Actual lending costs: ${result.aaveData.lendingCosts}\n`;
+                    }
+                    allChainMessages += chainMessage;
                 }
                 
-                if (successfulResults.length === 0 && failedChains.length === 0) {
-                    finalMessage = "No active Uniswap V3 positions found on any of the queried chains.";
+                let finalMessage = `*👜 Wallet: ${myAddress.substring(0, 6)}...${myAddress.substring(38)}*\n`;
+                
+                if (allChainMessages) {
+                    finalMessage += allChainMessages;
+                    
+                    if (grandOverallData.startDate && grandOverallData.startPrincipalUSD !== null) {
+                        const totalReturn = grandOverallData.totalPortfolioPrincipalUSD - grandOverallData.startPrincipalUSD;
+                        const totalReturnPercent = (totalReturn / grandOverallData.startPrincipalUSD) * 100;
+                        const feesAPR = (grandOverallData.totalFeeUSD / grandOverallData.startPrincipalUSD) * (365.25 * 24 * 60 * 60 * 1000 / (new Date() - grandOverallData.startDate)) * 100;
+
+                        finalMessage += `\n====== OVERALL PERFORMANCE ======\n`;
+                        finalMessage += `(Based on the *${grandOverallData.totalPositions}* displayed Uniswap position(s))\n`;
+                        finalMessage += `🏛 Initial Investment: $${grandOverallData.startPrincipalUSD.toFixed(2)}\n`;
+                        finalMessage += `🏛 Total Holdings: $${grandOverallData.totalPortfolioPrincipalUSD.toFixed(2)}\n`;
+                        finalMessage += `📈 Holdings Change: $${totalReturn.toFixed(2)} (${totalReturnPercent.toFixed(2)}%)\n`;
+
+                        finalMessage += `\n*Fee Performance*\n`;
+                        finalMessage += `💰 Total Fees Earned: $${grandOverallData.totalFeeUSD.toFixed(2)}\n`;
+                        finalMessage += `💰 Fees APR: ${feesAPR.toFixed(2)}%\n`;
+
+                        const allTimeGains = totalReturn + grandOverallData.totalFeeUSD;
+                        finalMessage += `\n📈 Total return + Fees: $${allTimeGains.toFixed(2)}\n`;
+                    }
+                }
+                
+                if (successfulChains === 0 && failedChains.length === 0) {
+                    finalMessage = "No active Uniswap V3 or Aave positions found on any of the queried chains.";
                 } else if (failedChains.length > 0) {
-                    finalMessage += `\n\n⚠️ Could not fetch data for the following chains: *${failedChains.join(', ')}*. The RPC node may be down or the contracts may not be deployed there.`;
+                    finalMessage += `\n\n⚠️ Could not fetch data for the following chains: *${failedChains.join(', ')}*.`;
                 }
 
                 if (finalMessage) {
                     await sendMessage(chatId, finalMessage);
                 }
 
+            } else if (command === '/snapshot') {
+                const chainsToQuery = chainName && chains[chainName] ? [chainName] : Object.keys(chains);
+
+                await sendMessage(chatId, `Searching for positions on: *${chainsToQuery.join(', ')}*... This may take a moment.`);
+                await sendChatAction(chatId, 'upload_photo');
+                
+                const promises = chainsToQuery.map(chain => getPositionsData(myAddress, chain).then(data => ({ chain, data, status: 'fulfilled' })).catch(error => ({ chain, error, status: 'rejected' })));
+                const results = await Promise.all(promises);
+
+                let successfulChains = 0;
+                let failedChains = [];
+                for (const result of results) {
+                    if (result.status === 'fulfilled' && result.data.length > 0) {
+                        successfulChains++;
+                        await handleSnapshotCommand(result.data, result.chain, chatId);
+                    } else if (result.status === 'rejected') {
+                        failedChains.push(result.chain);
+                        console.error(`Failed to fetch data for ${result.chain}:`, result.error);
+                    }
+                }
+                if (successfulChains === 0 && failedChains.length === 0) {
+                    await sendMessage(chatId, "No active Uniswap V3 positions found on any of the queried chains.");
+                } else if (failedChains.length > 0) {
+                    await sendMessage(chatId, `\n\n⚠️ Could not fetch data for the following chains: *${failedChains.join(', ')}*.`);
+                }
+
             } else if (command === '/start') {
-                const startMessage = `Welcome! I am a Uniswap V3 LP Position tracker.\n\n` +
+                const startMessage = `Welcome! I am a Uniswap V3 & Aave V3 tracker.\n\n` +
                                      `Here are the available commands:\n` +
-                                     `*/positions [chain]* - Get a detailed text summary.\n` +
-                                     `*/snapshot [chain]* - Receive an image snapshot.\n\n` +
-                                     `If you don't specify a chain, the bot will search on all supported chains.\n\n`+
+                                     `*/positions [chain]* - Get a detailed summary.\n` +
+                                     `*/snapshot [chain]* - Get an image snapshot (Uniswap only).\n\n` +
+                                     `If you don't specify a chain, I will search all supported chains.\n\n` +
                                      `*Supported Chains:*\n` +
                                      Object.keys(chains).join(', ');
                 await sendMessage(chatId, startMessage);
             } else {
-                await sendMessage(chatId, "I received your message, but I only understand the /positions and /snapshot commands. Please select one from the menu.");
+                await sendMessage(chatId, "I only understand the /positions and /snapshot commands. Please select one from the menu.");
             }
         } catch (error) {
             console.error("Error in processTelegramCommand:", error);
@@ -907,6 +932,7 @@ async function sendChatAction(chatId, action) {
     }
 }
 
+// Start the Express server
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
     setTelegramMenuCommands();
