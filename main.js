@@ -8,6 +8,9 @@ const { createCanvas, loadImage, registerFont } = require('canvas');
 const FormData = require('form-data');
 const fs = require('fs');
 const path = require('path');
+// ++ NEW: Import Aave ABIs ++
+const { abi: aavePoolAbi } = require('@aave/core-v3/artifacts/contracts/protocol/pool/Pool.sol/Pool.json');
+const { abi: aaveDataProviderAbi } = require('@aave/core-v3/artifacts/contracts/misc/AaveProtocolDataProvider.sol/AaveProtocolDataProvider.json');
 
 
 // --- Configuration from Environment Variables ---
@@ -20,38 +23,80 @@ const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 const chains = {
     base: {
         rpcUrl: "https://base.publicnode.com",
-        managerAddress: "0x03a520b32c04bf3beef7beb72e919cf822ed34f1",
-        factoryAddress: '0x33128a8fC17869897dcE68Ed026d694621f6FDfD'
+        uniswap: {
+            managerAddress: "0x03a520b32c04bf3beef7beb72e919cf822ed34f1",
+            factoryAddress: '0x33128a8fC17869897dcE68Ed026d694621f6FDfD'
+        },
+        aave: {
+            poolAddress: "0xA238Dd80C259a72e81d7e4664a9801593F98d1c5",
+            dataProviderAddress: "0xC4Fcf9893072d61Cc2899C0054877Cb752587981"
+        }
     },
     ethereum: {
         rpcUrl: "https://ethereum-rpc.publicnode.com",
-        managerAddress: "0xC36442b4a4522E871399CD717aBDD847Ab11FE88",
-        factoryAddress: "0x1F98431c8aD98523631AE4a59f267346ea31F984"
-    },
-    polygon: {
-        rpcUrl: "https://polygon-bor-rpc.publicnode.com",
-        managerAddress: "0xC36442b4a4522E871399CD717aBDD847Ab11FE88",
-        factoryAddress: "0x1F98431c8aD98523631AE4a59f267346ea31F984"
-    },
-    avalanche: {
-        rpcUrl: "https://avalanche-c-chain-rpc.publicnode.com",
-        managerAddress: "0x655C406EBFa14EE2006250925e54ec43AD184f8B",
-        factoryAddress: "0x740b1c1de25031C31FF4fC9A62f554A55cdC1baD"
-    },
-    optimism: {
-        rpcUrl: "https://optimism-rpc.publicnode.com",
-        managerAddress: "0xC36442b4a4522E871399CD717aBDD847Ab11FE88",
-        factoryAddress: "0x1F98431c8aD98523631AE4a59f267346ea31F984"
-    },
-    arbitrum: {
-        rpcUrl: "https://arbitrum-one-rpc.publicnode.com",
-        managerAddress: "0xC36442b4a4522E871399CD717aBDD847Ab11FE88",
-        factoryAddress: "0x1F98431c8aD98523631AE4a59f267346ea31F984"
+        uniswap: {
+            managerAddress: "0xC36442b4a4522E871399CD717aBDD847Ab11FE88",
+            factoryAddress: "0x1F98431c8aD98523631AE4a59f267346ea31F984"
+        },
+        aave: {
+            poolAddress: "0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2",
+            dataProviderAddress: "0x497a1994c46d4f6C864904A9f1fac6328Cb7C8a6"
+        }
     },
     bnb: {
         rpcUrl: "https://bsc-rpc.publicnode.com",
-        managerAddress: "0x7b8A01B39D58278b5DE7e48c8449c9f4F5170613",
-        factoryAddress: "0xdB1d10011AD0Ff90774D0C6Bb92e5C5c8b4461F7"
+        uniswap: {
+            managerAddress: "0x7b8A01B39D58278b5DE7e48c8449c9f4F5170613",
+            factoryAddress: "0xdB1d10011AD0Ff90774D0C6Bb92e5C5c8b4461F7"
+        },
+        aave: {
+            poolAddress: "0x6807dc923806fE8Fd134338EABCA509979a7e0cB",
+            dataProviderAddress: "0x1e26247502e90b4fab9D0d17e4775e90085D2A35"
+        }
+    },
+    polygon: {
+        rpcUrl: "https://polygon-bor-rpc.publicnode.com",
+        uniswap: {
+            managerAddress: "0xC36442b4a4522E871399CD717aBDD847Ab11FE88",
+            factoryAddress: "0x1F98431c8aD98523631AE4a59f267346ea31F984"
+        },
+        aave: {
+            poolAddress: "0x794a61358D6845594F94dc1DB02A252b5b4814aD",
+            dataProviderAddress: "0x14496b405D62c24F91f04Cda1c69Dc526D56fDE5"
+        }
+    },
+    avalanche: {
+        rpcUrl: "https://avalanche-c-chain-rpc.publicnode.com",
+        uniswap: {
+            managerAddress: "0x655C406EBFa14EE2006250925e54ec43AD184f8B",
+            factoryAddress: "0x740b1c1de25031C31FF4fC9A62f554A55cdC1baD"
+        },
+        aave: {
+            poolAddress: "0x794a61358D6845594F94dc1DB02A252b5b4814aD",
+            dataProviderAddress: "0x14496b405D62c24F91f04Cda1c69Dc526D56fDE5"
+        }
+    },
+    optimism: {
+        rpcUrl: "https://optimism-rpc.publicnode.com",
+        uniswap: {
+            managerAddress: "0xC36442b4a4522E871399CD717aBDD847Ab11FE88",
+            factoryAddress: "0x1F98431c8aD98523631AE4a59f267346ea31F984"
+        },
+        aave: {
+            poolAddress: "0x794a61358D6845594F94dc1DB02A252b5b4814aD",
+            dataProviderAddress: "0x14496b405D62c24F91f04Cda1c69Dc526D56fDE5"
+        }
+    },
+    arbitrum: {
+        rpcUrl: "https://arbitrum-one-rpc.publicnode.com",
+        uniswap: {
+            managerAddress: "0xC36442b4a4522E871399CD717aBDD847Ab11FE88",
+            factoryAddress: "0x1F98431c8aD98523631AE4a59f267346ea31F984"
+        },
+        aave: {
+            poolAddress: "0x794a61358D6845594F94dc1DB02A252b5b4814aD",
+            dataProviderAddress: "0x14496b405D62c24F91f04Cda1c69Dc526D56fDE5"
+        }
     }
 };
 
@@ -89,6 +134,7 @@ const erc20Abi = [
     "function symbol() view returns (string)",
     "function decimals() view returns (uint8)"
 ];
+
 
 const UINT128_MAX = "340282366920938463463374607431768211455";
 const { formatUnits } = ethers;
@@ -195,7 +241,7 @@ function formatTokenAmount(val, decimals = 6) {
 function formatElapsedDaysHours(ms) {
     const days = Math.floor(ms / (1000 * 60 * 60 * 24));
     const hours = Math.floor((ms % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-    return `${days} days, ${hours} `;
+    return `${days} days, ${hours} hours`;
 }
 
 async function getMintEventBlock(manager, tokenId, provider, ownerAddress) {
@@ -303,11 +349,11 @@ async function fetchHistoricalPrice(coinId, dateStr) {
 
 // --- Main Data Fetching and Formatting Logic ---
 async function getPositionsData(walletAddress, chain) {
-    const chainConfig = chains[chain];
+    const chainConfig = chains[chain]?.uniswap;
     if (!chainConfig) {
-        throw new Error(`Unsupported chain: ${chain}`);
+        throw new Error(`Unsupported chain for Uniswap: ${chain}`);
     }
-    const provider = new ethers.JsonRpcProvider(chainConfig.rpcUrl);
+    const provider = new ethers.JsonRpcProvider(chains[chain].rpcUrl);
     
     const prices = await getUsdPrices();
     const manager = new ethers.Contract(chainConfig.managerAddress, managerAbi, provider);
@@ -414,7 +460,6 @@ async function getFormattedPositionData(allPositionsData, chain) {
     
     for (const data of allPositionsData) {
         let currentPositionMessage = "";
-        // ++ CHANGE: Updated header format ++
         currentPositionMessage += `\n---------- ${data.chain.toUpperCase()} -- Position #${data.i.toString()} ----------\n`;
         currentPositionMessage += `🔹 Token ID: \`${data.tokenId.toString()}\`\n`;
         currentPositionMessage += `🔸 Pool: ${data.t0.symbol}/${data.t1.symbol} (${Number(data.pos.fee)/10000}% fee)\n`;
@@ -506,365 +551,4 @@ async function getFormattedPositionData(allPositionsData, chain) {
     return chainReport;
 }
 
-
-async function generateSnapshotImage(data) {
-    const width = 720;
-    const height = 1280;
-    const canvas = createCanvas(width, height);
-    const ctx = canvas.getContext('2d');
-
-    try {
-        if (fs.existsSync('background.jpg')) {
-            const background = await loadImage('background.jpg');
-            ctx.drawImage(background, 0, 0, width, height);
-        } else {
-            ctx.fillStyle = '#1a202c';
-            ctx.fillRect(0, 0, width, height);
-        }
-    } catch (e) {
-        console.error("Could not load background image:", e);
-        ctx.fillStyle = '#1a202c';
-        ctx.fillRect(0, 0, width, height);
-    }
-
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
-    ctx.fillRect(50, 200, width - 100, 600);
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(50, 200, width - 100, 600);
-
-
-    ctx.fillStyle = '#FFFFFF';
-    ctx.textAlign = 'center';
-    
-    ctx.font = '40px Roboto';
-    ctx.fillText(`${data.pair} ${data.feeTier}`, width / 2, 260);
-    ctx.font = '30px Roboto';
-    ctx.fillText(`${data.timestamp}`, width / 2, 300);
-
-    ctx.font = '32px Roboto';
-    ctx.textAlign = 'left';
-
-    const drawLine = (label, value, y) => {
-        ctx.fillStyle = '#cccccc';
-        ctx.fillText(label, 70, y);
-        ctx.fillStyle = '#FFFFFF';
-        ctx.textAlign = 'right';
-        ctx.fillText(value, width - 70, y);
-        ctx.textAlign = 'left';
-    };
-    
-    const holdingsChangeColor = data.holdingsChange.startsWith('-') ? '#FF6B6B' : '#63FF84';
-
-    drawLine("Current Value:", data.currentValue, 380);
-    
-    ctx.fillStyle = '#cccccc';
-    ctx.fillText("Holdings Change:", 70, 440);
-    ctx.fillStyle = holdingsChangeColor;
-    ctx.textAlign = 'right';
-    ctx.fillText(data.holdingsChange, width - 70, 440);
-    ctx.textAlign = 'left';
-
-    drawLine(`Uncollected ${data.t0Symbol}:`, data.fees0, 530);
-    drawLine(`Uncollected ${data.t1Symbol}:`, data.fees1, 590);
-    drawLine("Total Fees:", data.totalFees, 650);
-    drawLine("Fees APR:", data.feesAPR, 710);
-
-    return canvas.toBuffer('image/png');
-}
-
-async function handleSnapshotCommand(allPositionsData, chain, chatId) {
-    if (allPositionsData.length === 0) {
-        return; 
-    }
-
-    for (const data of allPositionsData) {
-        const principalUSD = (data.amt0 * data.prices.WETH) + (data.amt1 * data.prices.USDC);
-        const positionHoldingsChange = principalUSD - data.currentPositionInitialPrincipalUSD;
-        const feeUSD0 = data.fee0 * (data.t0.symbol.toUpperCase() === "WETH" ? data.prices.WETH : data.prices.USDC);
-        const feeUSD1 = data.fee1 * (data.t1.symbol.toUpperCase() === "WETH" ? data.prices.WETH : data.prices.USDC);
-        const totalPositionFeesUSD = feeUSD0 + feeUSD1;
-        
-        let feesAPR = "N/A";
-        let timestamp = "N/A";
-
-        if (data.positionHistoryAnalysisSucceeded) {
-             const now = new Date();
-             const elapsedMs = now.getTime() - data.currentPositionStartDate.getTime();
-             const rewardsPerYear = elapsedMs > 0 ? totalPositionFeesUSD * (365.25 * 24 * 60 * 60 * 1000) / elapsedMs : 0;
-             feesAPR = `${((rewardsPerYear / data.currentPositionInitialPrincipalUSD) * 100).toFixed(2)}%`;
-             const adjustedDate = new Date(data.currentPositionStartDate.getTime() + (2 * 60 * 60 * 1000));
-             const day = adjustedDate.getDate().toString().padStart(2, '0');
-             const month = (adjustedDate.getMonth() + 1).toString().padStart(2, '0');
-             const year = adjustedDate.getFullYear();
-             const hours = adjustedDate.getHours().toString().padStart(2, '0');
-             const minutes = adjustedDate.getMinutes().toString().padStart(2, '0');
-             timestamp = `${day}-${month}-${year} ${hours}:${minutes}`;
-        }
-
-        const snapshotData = {
-            timestamp: timestamp,
-            pair: `${data.t0.symbol}/${data.t1.symbol}`,
-            feeTier: `${(Number(data.pos.fee) / 10000).toFixed(2)}%`,
-            currentValue: `$${principalUSD.toFixed(2)}`,
-            holdingsChange: `${positionHoldingsChange.toFixed(2)}`,
-            t0Symbol: data.t0.symbol,
-            t1Symbol: data.t1.symbol,
-            fees0: formatTokenAmount(data.fee0, 6),
-            fees1: formatTokenAmount(data.fee1, 2),
-            totalFees: `$${totalPositionFeesUSD.toFixed(2)}`,
-            feesAPR: feesAPR
-        };
-        
-        const imageBuffer = await generateSnapshotImage(snapshotData);
-        await sendPhoto(chatId, imageBuffer, `Position on ${chain}`);
-    }
-}
-
-
-
-// --- Telegram API Functions ---
-
-async function setTelegramMenuCommands() {
-    const telegramApiUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setMyCommands`;
-    const commands = [
-        { command: 'start', description: 'Start info.' },
-        { command: 'positions', description: 'Overview of all LP positions.' },
-        { command: 'snapshot', description: 'Show off your gains.' }
-    ];
-
-    try {
-        const response = await fetch(telegramApiUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ commands: commands })
-        });
-        const data = await response.json();
-        if (data.ok) {
-            console.log("Successfully set Telegram menu commands.");
-        } else {
-            console.error("Failed to set Telegram menu commands:", data);
-        }
-    } catch (error) {
-        console.error('Error setting Telegram menu commands:', error);
-    }
-}
-
-
-// --- Express App Setup for Webhook ---
-const app = express();
-const PORT = process.env.PORT || 3000;
-
-app.use(bodyParser.json());
-
-app.post(`/bot${TELEGRAM_BOT_TOKEN}/webhook`, async (req, res) => {
-    const telegramSecret = req.get('X-Telegram-Bot-Api-Secret-Token');
-    if (!WEBHOOK_SECRET || telegramSecret !== WEBHOOK_SECRET) {
-        console.warn('Unauthorized webhook access attempt! Invalid or missing secret token.');
-        return res.status(403).send('Forbidden: Invalid secret token');
-    }
-    res.sendStatus(200);
-    processTelegramCommand(req.body).catch(error => {
-        console.error("Unhandled error in async Telegram command processing:", error);
-    });
-});
-
-async function processTelegramCommand(update) {
-    if (update.message) {
-        const messageText = update.message.text;
-        const chatId = update.message.chat.id;
-
-        const [command, chainArg] = messageText.split(' ');
-        const chainName = chainArg?.toLowerCase();
-
-        try {
-            if (command === '/positions' || command === '/snapshot') {
-                const chainsToQuery = chainName && chains[chainName] ? [chainName] : Object.keys(chains);
-
-                await sendMessage(chatId, `Searching for positions on: *${chainsToQuery.join(', ')}*... This may take a moment.`);
-                if (command === '/positions') await sendChatAction(chatId, 'typing');
-                if (command === '/snapshot') await sendChatAction(chatId, 'upload_photo');
-
-                const promises = chainsToQuery.map(chain => getPositionsData(myAddress, chain).then(data => ({ chain, data, status: 'fulfilled' })).catch(error => ({ chain, error, status: 'rejected' })));
-                const results = await Promise.all(promises);
-
-                let successfulResults = [];
-                let failedChains = [];
-                
-                let allChainMessages = "";
-                // ++ FIX: Initialize a global data object for the overall summary ++
-                let grandOverallData = {
-                    totalFeeUSD: 0,
-                    startPrincipalUSD: null,
-                    startDate: null,
-                    totalPortfolioPrincipalUSD: 0,
-                    totalPositions: 0
-                };
-                
-                for (const result of results) {
-                    if (result.status === 'fulfilled' && result.data.length > 0) {
-                        successfulResults.push(result);
-                        if (command === '/positions') {
-                            allChainMessages += await getFormattedPositionData(result.data, result.chain);
-                            
-                            // ++ FIX: Aggregate data for the overall summary ++
-                            for (const posData of result.data) {
-                                if (posData.positionHistoryAnalysisSucceeded) {
-                                    if (!grandOverallData.startDate || posData.currentPositionStartDate.getTime() < grandOverallData.startDate.getTime()) {
-                                        grandOverallData.startDate = posData.currentPositionStartDate;
-                                        grandOverallData.startPrincipalUSD = posData.currentPositionInitialPrincipalUSD;
-                                    }
-                                }
-                                const principalUSD = (posData.amt0 * posData.prices.WETH) + (posData.amt1 * posData.prices.USDC);
-                                const feeUSD0 = posData.fee0 * (posData.t0.symbol.toUpperCase() === "WETH" ? posData.prices.WETH : posData.prices.USDC);
-                                const feeUSD1 = posData.fee1 * (posData.t1.symbol.toUpperCase() === "WETH" ? posData.prices.WETH : posData.prices.USDC);
-                                
-                                grandOverallData.totalPortfolioPrincipalUSD += principalUSD;
-                                grandOverallData.totalFeeUSD += (feeUSD0 + feeUSD1);
-                                grandOverallData.totalPositions++;
-                            }
-                        }
-                    } else if (result.status === 'rejected') {
-                        failedChains.push(result.chain);
-                        console.error(`Failed to fetch data for ${result.chain}:`, result.error);
-                    }
-                }
-                
-                if (command === '/snapshot') {
-                    for (const result of successfulResults) {
-                         await handleSnapshotCommand(result.data, result.chain, chatId);
-                    }
-                }
-                
-                let finalMessage = "";
-                if (command === '/positions') {
-                     if (allChainMessages) {
-                        finalMessage = `*👜 Wallet: ${myAddress.substring(0, 6)}...${myAddress.substring(38)}*\n\n` + allChainMessages;
-                        
-                        // ++ FIX: Add the restored overall performance section ++
-                        if (grandOverallData.startDate && grandOverallData.startPrincipalUSD !== null) {
-                            const now = new Date();
-                            const elapsedMs = now.getTime() - grandOverallData.startDate.getTime();
-                            const rewardsPerYear = elapsedMs > 0 ? grandOverallData.totalFeeUSD * (365.25 * 24 * 60 * 60 * 1000) / elapsedMs : 0;
-                            const totalReturn = grandOverallData.totalPortfolioPrincipalUSD - grandOverallData.startPrincipalUSD;
-                            const totalReturnPercent = (totalReturn / grandOverallData.startPrincipalUSD) * 100;
-                            const feesAPR = (rewardsPerYear / grandOverallData.startPrincipalUSD) * 100;
-
-                            finalMessage += `\n====== OVERALL PERFORMANCE ======\n`;
-                            finalMessage += `(Based on the *${grandOverallData.totalPositions}* displayed position(s))\n`;
-                            finalMessage += `🏛 Initial Investment: $${grandOverallData.startPrincipalUSD.toFixed(2)}\n`;
-                            finalMessage += `🏛 Total Holdings: $${grandOverallData.totalPortfolioPrincipalUSD.toFixed(2)}\n`;
-                            finalMessage += `📈 Holdings Change: $${totalReturn.toFixed(2)} (${totalReturnPercent.toFixed(2)}%)\n`;
-
-                            finalMessage += `\n*Fee Performance*\n`;
-                            finalMessage += `💰 Total Fees Earned: $${grandOverallData.totalFeeUSD.toFixed(2)}\n`;
-                            finalMessage += `💰 Fees APR: ${feesAPR.toFixed(2)}%\n`;
-
-                            const allTimeGains = totalReturn + grandOverallData.totalFeeUSD;
-                            finalMessage += `\n📈 Total return + Fees: $${allTimeGains.toFixed(2)}\n`;
-                        }
-                    }
-                }
-                
-                if (successfulResults.length === 0 && failedChains.length === 0) {
-                    finalMessage = "No active Uniswap V3 positions found on any of the queried chains.";
-                } else if (failedChains.length > 0) {
-                    finalMessage += `\n\n⚠️ Could not fetch data for the following chains: *${failedChains.join(', ')}*. The RPC node may be down or the contracts may not be deployed there.`;
-                }
-
-                if (finalMessage) {
-                    await sendMessage(chatId, finalMessage);
-                }
-
-            } else if (command === '/start') {
-                const startMessage = `Welcome! I am a Uniswap V3 LP Position tracker.\n\n` +
-                                     `Here are the available commands:\n` +
-                                     `*/positions [chain]* - Get a detailed text summary.\n` +
-                                     `*/snapshot [chain]* - Receive an image snapshot.\n\n` +
-                                     `If you don't specify a chain, the bot will search on all supported chains.\n\n`+
-                                     `*Supported Chains:*\n` +
-                                     Object.keys(chains).join(', ');
-                await sendMessage(chatId, startMessage);
-            } else {
-                await sendMessage(chatId, "I received your message, but I only understand the /positions and /snapshot commands. Please select one from the menu.");
-            }
-        } catch (error) {
-            console.error("Error in processTelegramCommand:", error);
-            await sendMessage(chatId, `An unexpected error occurred. Please try again later.`);
-        }
-    }
-}
-
-async function sendMessage(chatId, text) {
-    const telegramApiUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
-    try {
-        const response = await fetch(telegramApiUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                chat_id: chatId,
-                text: text,
-                parse_mode: 'Markdown',
-                disable_web_page_preview: true
-            })
-        });
-        const data = await response.json();
-        if (!response.ok) {
-            console.error('Failed to send message:', data);
-        }
-    } catch (error) {
-        console.error('Error sending message to Telegram:', error);
-    }
-}
-
-async function sendPhoto(chatId, photoBuffer, caption = '') {
-    const form = new FormData();
-    form.append('chat_id', chatId);
-    form.append('photo', photoBuffer, {
-        filename: 'snapshot.png',
-        contentType: 'image/png',
-    });
-    if (caption) {
-        form.append('caption', caption);
-    }
-
-    const telegramApiUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`;
-    try {
-        const response = await fetch(telegramApiUrl, {
-            method: 'POST',
-            body: form,
-            headers: form.getHeaders(),
-        });
-        const data = await response.json();
-        if (!response.ok) {
-            console.error('Failed to send photo:', data);
-        } else {
-             console.log(`Successfully sent photo to chat ID: ${chatId}`);
-        }
-    } catch (error) {
-        console.error('Error sending photo to Telegram:', error);
-    }
-}
-
-
-async function sendChatAction(chatId, action) {
-    const telegramApiUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendChatAction`;
-    try {
-        await fetch(telegramApiUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                chat_id: chatId,
-                action: action
-            })
-        });
-    } catch (error) {
-        console.error('Error sending chat action to Telegram:', error);
-    }
-}
-
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-    setTelegramMenuCommands();
-    console.log(`Telegram webhook URL: ${RENDER_WEBHOOK_URL}/bot${TELEGRAM_BOT_TOKEN}/webhook`);
-});
+// ... (Rest of your existing code)
