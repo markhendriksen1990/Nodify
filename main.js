@@ -449,7 +449,6 @@ async function getPositionsData(walletAddress, chain) {
     return positionsData;
 }
 
-
 async function getFormattedPositionData(allPositionsData, chain) {
     if (allPositionsData.length === 0) {
         return ``; 
@@ -621,10 +620,10 @@ async function getAaveData(walletAddress, chain) {
         let lendingCostsString = "$0.00 over 0 days";
 
         if (accountData.totalDebtBase.toString() > '0') {
-            // Get current borrow details using the reliable method from your test script
+            // --- Get Current Borrow Details ---
             const allReserves = await dataProvider.getAllReservesTokens();
             let borrowedAssetDetails = [];
-
+            
             for (const reserve of allReserves) {
                 try {
                     const userReserveData = await dataProvider.getUserReserveData(reserve.tokenAddress, walletAddress);
@@ -644,7 +643,6 @@ async function getAaveData(walletAddress, chain) {
                             const borrowRate = debtType === 'Stable' 
                                 ? reserveData.currentStableBorrowRate 
                                 : reserveData.currentVariableBorrowRate;
-                            
                             apy = Number(ethers.formatUnits(borrowRate, 25)).toFixed(2);
                         } catch (e) {
                             console.error(`--> Could not fetch APY for ${reserve.symbol}:`, e.message);
@@ -653,15 +651,14 @@ async function getAaveData(walletAddress, chain) {
                         borrowedAssetDetails.push(`• ${reserve.symbol}: $${formattedDebt.toFixed(2)} at ${apy}% APY (${debtType} rate)`);
                     }
                 } catch (assetError) {
-                    // This will catch errors for a specific asset without stopping the whole script
+                    // Ignore errors for individual assets
                 }
             }
-             if (borrowedAssetDetails.length > 0) {
+            if (borrowedAssetDetails.length > 0) {
                 borrowedAssetsString = borrowedAssetDetails.join('\n');
             }
 
-
-            // Calculate historical costs
+            // --- Calculate Historical Costs ---
             const borrowEvents = await getAaveBorrowEvents(pool, provider, walletAddress);
             if (borrowEvents.length > 0) {
                 let earliestBorrowTimestamp = Date.now();
@@ -710,8 +707,6 @@ async function getAaveData(walletAddress, chain) {
         return null;
     }
 }
-
-
 async function generateSnapshotImage(data) {
     const width = 720;
     const height = 1280;
@@ -825,8 +820,6 @@ async function handleSnapshotCommand(allPositionsData, chain, chatId) {
         await sendPhoto(chatId, imageBuffer, `Position on ${chain}`);
     }
 }
-
-
 
 // --- Telegram API Functions ---
 
