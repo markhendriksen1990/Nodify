@@ -711,6 +711,7 @@ async function getAaveData(walletAddress, chain) {
     }
 }
 
+
 async function generateSnapshotImage(data) {
     const width = 720;
     const height = 1280;
@@ -1092,7 +1093,6 @@ async function sendChatAction(chatId, action) {
     }
 }
 
-// Start the Express server
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
     setTelegramMenuCommands();
