@@ -643,7 +643,11 @@ async function getAaveData(walletAddress, chain) {
                                 ? reserveData.currentStableBorrowRate 
                                 : reserveData.currentVariableBorrowRate;
                             
-                            apy = Number(ethers.formatUnits(borrowRate, 25)).toFixed(2);
+                            // ++ FIX: Calculate APY from the APR provided by the contract ++
+                            const apr = Number(ethers.formatUnits(borrowRate, 25)); // This is the APR as a percentage
+                            const calculatedApy = (((1 + (apr / 100) / 365) ** 365) - 1) * 100;
+                            apy = calculatedApy.toFixed(2);
+
                         } catch (e) {
                             console.error(`--> Could not fetch APY for ${reserve.symbol}:`, e.message);
                         }
