@@ -449,6 +449,7 @@ async function getPositionsData(walletAddress, chain) {
     return positionsData;
 }
 
+
 async function getFormattedPositionData(allPositionsData, chain) {
     if (allPositionsData.length === 0) {
         return ``; 
@@ -548,6 +549,8 @@ async function getFormattedPositionData(allPositionsData, chain) {
 
     return chainReport;
 }
+
+// ... (Rest of your existing code from the previous turn)
 
 // --- Aave-Specific Functions ---
 
