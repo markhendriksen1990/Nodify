@@ -42,8 +42,8 @@ const chains = {
             factoryAddress: '0x1f98400000000000000000000000000000000003'
         },
         aave: {
-            poolAddress: "N.A.",
-            dataProviderAddress: "N.A."
+            poolAddress: "",
+            dataProviderAddress: ""
         }
     },
     ethereum: {
@@ -305,7 +305,10 @@ async function getAaveBorrowEvents(pool, provider, userAddress) {
 // --- UTILITY --- Aave-Specific Functions ---
 async function getAaveData(walletAddress, chain) {
     const chainConfig = chains[chain]?.aave;
-    if (!chainConfig) {
+
+    // --- MODIFIED LINE ---
+    // This check now handles empty strings, null, or undefined addresses gracefully.
+    if (!chainConfig || !chainConfig.poolAddress) {
         return null;
     }
     const provider = new ethers.JsonRpcProvider(chains[chain].rpcUrl);
@@ -384,7 +387,8 @@ async function getAaveData(walletAddress, chain) {
                 
                 const loanDurationMs = Date.now() - earliestBorrowTimestamp;
                 const loanDurationInDays = loanDurationMs / (1000 * 60 * 60 * 24);
-                const averageApy = weightedApySum / totalBorrowValue;
+                // A check to prevent division by zero if totalBorrowValue is 0
+                const averageApy = totalBorrowValue > 0 ? weightedApySum / totalBorrowValue : 0;
                 const estimatedCost = totalDebtUSD * (averageApy / 100) * (loanDurationInDays / 365);
                 
                 lendingCostsString = `$${estimatedCost.toFixed(2)} over ${formatElapsedDaysHours(loanDurationMs)}`;
