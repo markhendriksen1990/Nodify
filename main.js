@@ -863,12 +863,13 @@ async function processTelegramCommand(update) {
         const chainName = chainArg?.toLowerCase();
 
         try {
-            if (command === '/positions' || command === '/snapshot') {
+            // --- CORRECTED LOGIC ---
+            // Separated the '/positions' and '/snapshot' commands into distinct blocks.
+            if (command === '/positions') {
                 const chainsToQuery = chainName && chains[chainName] ? [chainName] : Object.keys(chains);
-                
+
                 await sendMessage(chatId, `Searching for positions on: *${chainsToQuery.join(', ')}*... This may take a moment.`);
-                if (command === '/positions') await sendChatAction(chatId, 'typing');
-                if (command === '/snapshot') await sendChatAction(chatId, 'upload_photo');
+                await sendChatAction(chatId, 'typing');
 
                 const coingeckoChainIdMap = await getCoinGeckoChainIdMap();
 
