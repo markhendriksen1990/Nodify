@@ -258,6 +258,13 @@ async function getBlockTimestamp(blockNumber, provider) {
 }
 
 // --- UTILITY --- Aave-Specific Functions ---
+function formatElapsedDaysHours(ms) {
+    if (typeof ms !== 'number' || ms < 0) return '0 days, 0 hours';
+    const days = Math.floor(ms / (1000 * 60 * 60 * 24));
+    const hours = Math.floor((ms % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    return `${days} days, ${hours} hours`;
+}
+
 async function getAaveBorrowEvents(pool, provider, userAddress) {
     const latestBlock = await provider.getBlockNumber();
     const borrowFilter = pool.filters.Borrow(null, null, userAddress);
