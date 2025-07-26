@@ -35,7 +35,7 @@ const chains = {
             dataProviderAddress: "0xC4Fcf9893072d61Cc2899C0054877Cb752587981"
         }
     },
-        unichain: {
+    unichain: {
         rpcUrl: "https://unichain-rpc.publicnode.com",
         uniswap: {
             managerAddress: "0x943e6e07a7e8e791dafc44083e54041d743c46e9",
@@ -134,26 +134,26 @@ try {
 
 // --- ABIs ---
 const managerAbi = [
-    "function balanceOf(address owner) view returns (uint256)",
-    "function tokenOfOwnerByIndex(address owner, uint256 index) view returns (uint256)",
-    "function positions(uint256 tokenId) view returns (uint96 nonce, address operator, address token0, address token1, uint24 fee, int24 tickLower, int24 tickUpper, uint128 liquidity, uint256 feeGrowthInside0LastX128, uint256 feeGrowthInside1LastX128, uint128 tokensOwed0, uint128 tokensOwed1)",
-    "event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)",
-    "function collect(tuple(uint256 tokenId, address recipient, uint128 amount0Max, uint128 amount1Max)) external returns (uint256 amount0, uint256 amount1)"
+    "function balanceOf(address owner) view returns (uint256)", "function tokenOfOwnerByIndex(address owner, uint256 index) view returns (uint256)", "function positions(uint256 tokenId) view returns (uint96 nonce, address operator, address token0, address token1, uint24 fee, int24 tickLower, int24 tickUpper, uint128 liquidity, uint256, uint256, uint128, uint128)", "event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)", "function collect(tuple(uint256 tokenId, address recipient, uint128 amount0Max, uint128 amount1Max)) external returns (uint256 amount0, uint256 amount1)"
 ];
 const poolAbi = [
-    "function slot0() external view returns (uint160 sqrtPriceX96,int24 tick,uint16 observationIndex,uint16 observationCardinality,uint16 observationCardinalityNext,uint8 feeProtocol,bool unlocked)",
-    "function token0() view returns (address)",
-    "function token1() view returns (address)"
+    "function slot0() external view returns (uint160 sqrtPriceX96,int24 tick,uint16,uint16,uint16,uint8,bool)", "function token0() view returns (address)", "function token1() view returns (address)"
 ];
 const erc20Abi = [
-    "function symbol() view returns (string)",
-    "function decimals() view returns (uint8)"
+    "function symbol() view returns (string)", "function decimals() view returns (uint8)"
 ];
 
 const UINT128_MAX = "340282366920938463463374607431768211455";
 const { formatUnits } = ethers;
 
-// --- UTILITY --- tickToPrice
+// --- UTILITY FUNCTIONS ---
+function formatElapsedDaysHours(ms) {
+    if (typeof ms !== 'number' || ms < 0) return '0 days, 0 hours';
+    const days = Math.floor(ms / (1000 * 60 * 60 * 24));
+    const hours = Math.floor((ms % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    return `${days} days, ${hours} hours`;
+}
+
 function tickToPrice(tick, t0, t1) {
     const priceRatio = Math.pow(1.0001, Number(tick));
     const decimalAdjustment = Math.pow(10, Number(t0.decimals) - Number(t1.decimals));
@@ -168,13 +168,10 @@ function formatTokenAmount(amount, decimals) {
 function tickToSqrtPriceX96(tick) {
     const ratio = Math.pow(1.0001, Number(tick));
     const product = Math.sqrt(ratio) * (2 ** 96);
-    if (!Number.isFinite(product)) {
-        return 0n;
-    }
+    if (!Number.isFinite(product)) { return 0n; }
     return BigInt(Math.floor(product));
 }
 
-// --- UTILITY --- getAmountsFromLiquidity
 function getAmountsFromLiquidity(liquidity, sqrtPriceX96, sqrtLowerX96, sqrtUpperX96) {
     liquidity = BigInt(liquidity);
     sqrtPriceX96 = BigInt(sqrtPriceX96);
@@ -193,7 +190,6 @@ function getAmountsFromLiquidity(liquidity, sqrtPriceX96, sqrtLowerX96, sqrtUppe
     return [amount0, amount1];
 }
 
-// --- UTILITY --- Token info
 async function getTokenMeta(addr, provider) {
     try {
         const t = new ethers.Contract(addr, erc20Abi, provider);
@@ -205,7 +201,6 @@ async function getTokenMeta(addr, provider) {
     }
 }
 
-// --- UTILITY --- Mint event block
 async function getMintEventBlock(manager, tokenId, provider, ownerAddress) {
     const latestBlock = await provider.getBlockNumber();
     const zeroAddress = ethers.ZeroAddress;
@@ -213,12 +208,10 @@ async function getMintEventBlock(manager, tokenId, provider, ownerAddress) {
     const maxRetries = 5;
     let toBlock = latestBlock;
     ownerAddress = ownerAddress.toLowerCase();
-
     while (toBlock >= 0) {
         let currentQueryWindow = INITIAL_RPC_QUERY_WINDOW;
         let fromBlock = toBlock - currentQueryWindow;
         if (fromBlock < 0) { fromBlock = 0; }
-
         const filter = manager.filters.Transfer(zeroAddress, null, tokenId);
         let success = false;
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -251,34 +244,21 @@ async function getMintEventBlock(manager, tokenId, provider, ownerAddress) {
     throw new Error(`Mint event not found for tokenId ${tokenId} after scanning all blocks.`);
 }
 
-// --- UTILITY --- Block Timestamp
 async function getBlockTimestamp(blockNumber, provider) {
     const block = await provider.getBlock(blockNumber);
     return block.timestamp * 1000;
 }
 
-// --- UTILITY --- Aave-Specific Functions ---
-function formatElapsedDaysHours(ms) {
-    if (typeof ms !== 'number' || ms < 0) return '0 days, 0 hours';
-    const days = Math.floor(ms / (1000 * 60 * 60 * 24));
-    const hours = Math.floor((ms % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-    return `${days} days, ${hours} hours`;
-}
-
+// --- Aave-Specific Functions ---
 async function getAaveBorrowEvents(pool, provider, userAddress) {
     const latestBlock = await provider.getBlockNumber();
     const borrowFilter = pool.filters.Borrow(null, null, userAddress);
     let events = [];
-    
     let fromBlock = 0;
-    const initialWindow = 49999; // Adjusted to be safe for most public RPCs
-
+    const initialWindow = 49999;
     while (fromBlock <= latestBlock) {
         let toBlock = fromBlock + initialWindow;
-        if (toBlock > latestBlock) {
-            toBlock = latestBlock;
-        }
-
+        if (toBlock > latestBlock) { toBlock = latestBlock; }
         let success = false;
         for (let attempt = 1; attempt <= 5; attempt++) {
             try {
@@ -289,99 +269,76 @@ async function getAaveBorrowEvents(pool, provider, userAddress) {
             } catch (e) {
                 const errorMessage = e.message || "";
                 if (errorMessage.includes("block range") || errorMessage.includes("exceed maximum")) {
-                     const smallerWindow = Math.floor((toBlock - fromBlock) / 2);
-                     toBlock = fromBlock + smallerWindow;
-                     console.warn(`Aave event scan failed (Attempt ${attempt}): Range too large. Retrying with window size ${smallerWindow}.`);
-                     await new Promise(res => setTimeout(res, 500 * attempt));
+                    const smallerWindow = Math.floor((toBlock - fromBlock) / 2);
+                    toBlock = fromBlock + smallerWindow;
+                    console.warn(`Aave event scan failed (Attempt ${attempt}): Range too large. Retrying with window size ${smallerWindow}.`);
+                    await new Promise(res => setTimeout(res, 500 * attempt));
                 } else {
                     console.error(`Unrecoverable error fetching Aave borrow events:`, e);
-                    throw e; 
+                    throw e;
                 }
             }
         }
-        
         if (!success) {
-             console.error(`Failed to fetch Aave events for range ${fromBlock}-${toBlock} after multiple retries.`);
+            console.error(`Failed to fetch Aave events for range ${fromBlock}-${toBlock} after multiple retries.`);
         }
-
         fromBlock = toBlock + 1;
     }
     return events;
 }
 
-// --- UTILITY --- Aave-Specific Functions ---
 async function getAaveData(walletAddress, chain) {
     const chainConfig = chains[chain]?.aave;
-
-    // --- MODIFIED LINE ---
-    // This check now handles empty strings, null, or undefined addresses gracefully.
     if (!chainConfig || !chainConfig.poolAddress) {
         return null;
     }
     const provider = new ethers.JsonRpcProvider(chains[chain].rpcUrl);
-
     try {
-        const pool = new ethers.Contract(chainConfig.poolAddress.toLowerCase(), aavePoolAbi, provider);
-        const dataProvider = new ethers.Contract(chainConfig.dataProviderAddress.toLowerCase(), aaveDataProviderAbi, provider);
+        const pool = new ethers.Contract(chainConfig.poolAddress, aavePoolAbi, provider);
+        const dataProvider = new ethers.Contract(chainConfig.dataProviderAddress, aaveDataProviderAbi, provider);
         const accountData = await pool.getUserAccountData(walletAddress);
-
         if (accountData.totalCollateralBase.toString() === '0') {
-            return null; // No Aave position
+            return null;
         }
-
         const healthFactor = parseFloat(formatUnits(accountData.healthFactor, 18));
         let healthStatus = "Safe";
         if (healthFactor < 1.5) healthStatus = "Careful";
         if (healthFactor < 1.1) healthStatus = "DANGER";
-
         let borrowedAssetsString = "None";
         let lendingCostsString = "$0.00 over 0 days";
-
         if (accountData.totalDebtBase.toString() > '0') {
             const allReserves = await dataProvider.getAllReservesTokens();
             let borrowedAssetDetails = [];
             let totalDebtUSD = parseFloat(formatUnits(accountData.totalDebtBase, 8));
             let weightedApySum = 0;
             let totalBorrowValue = 0;
-
             for (const reserve of allReserves) {
                 try {
                     const userReserveData = await dataProvider.getUserReserveData(reserve.tokenAddress, walletAddress);
-                    const stableDebt = userReserveData.currentStableDebt;
-                    const variableDebt = userReserveData.currentVariableDebt;
-                    const currentDebt = stableDebt > variableDebt ? stableDebt : variableDebt;
-                    const debtType = stableDebt > variableDebt ? 'Stable' : 'Variable';
-                    
+                    const currentDebt = userReserveData.currentStableDebt > userReserveData.currentVariableDebt ? userReserveData.currentStableDebt : userReserveData.currentVariableDebt;
+                    const debtType = userReserveData.currentStableDebt > userReserveData.currentVariableDebt ? 'Stable' : 'Variable';
                     if (currentDebt > 0n) {
                         const reserveAssetContract = new ethers.Contract(reserve.tokenAddress, erc20Abi, provider);
                         const decimals = await reserveAssetContract.decimals();
                         const formattedDebt = Number(ethers.formatUnits(currentDebt, decimals));
-                        
                         let apy = 0;
                         try {
                             const reserveData = await pool.getReserveData(reserve.tokenAddress);
-                            const borrowRate = debtType === 'Stable' 
-                                ? reserveData.currentStableBorrowRate 
-                                : reserveData.currentVariableBorrowRate;
+                            const borrowRate = debtType === 'Stable' ? reserveData.currentStableBorrowRate : reserveData.currentVariableBorrowRate;
                             const apr = Number(ethers.formatUnits(borrowRate, 25));
                             apy = (((1 + (apr / 100) / 365) ** 365) - 1) * 100;
                         } catch (e) {
                             console.error(`--> Could not fetch APY for ${reserve.symbol}:`, e.message);
                         }
-
                         borrowedAssetDetails.push(`• ${reserve.symbol}: $${formattedDebt.toFixed(2)} at ${apy.toFixed(2)}% APY (${debtType} rate)`);
                         weightedApySum += formattedDebt * apy;
                         totalBorrowValue += formattedDebt;
                     }
-                } catch (assetError) {
-                    // Ignore errors for individual assets
-                }
+                } catch (assetError) {}
             }
-             if (borrowedAssetDetails.length > 0) {
+            if (borrowedAssetDetails.length > 0) {
                 borrowedAssetsString = borrowedAssetDetails.join('\n');
             }
-
-            // Calculate historical costs
             const borrowEvents = await getAaveBorrowEvents(pool, provider, walletAddress);
             if (borrowEvents.length > 0) {
                 let earliestBorrowTimestamp = Date.now();
@@ -391,17 +348,13 @@ async function getAaveData(walletAddress, chain) {
                         earliestBorrowTimestamp = block.timestamp * 1000;
                     }
                 }
-                
                 const loanDurationMs = Date.now() - earliestBorrowTimestamp;
                 const loanDurationInDays = loanDurationMs / (1000 * 60 * 60 * 24);
-                // A check to prevent division by zero if totalBorrowValue is 0
                 const averageApy = totalBorrowValue > 0 ? weightedApySum / totalBorrowValue : 0;
                 const estimatedCost = totalDebtUSD * (averageApy / 100) * (loanDurationInDays / 365);
-                
                 lendingCostsString = `$${estimatedCost.toFixed(2)} over ${formatElapsedDaysHours(loanDurationMs)}`;
             }
         }
-
         return {
             totalCollateral: `$${parseFloat(formatUnits(accountData.totalCollateralBase, 8)).toFixed(2)}`,
             totalDebt: `$${parseFloat(formatUnits(accountData.totalDebtBase, 8)).toFixed(2)}`,
@@ -409,7 +362,6 @@ async function getAaveData(walletAddress, chain) {
             borrowedAssets: borrowedAssetsString,
             lendingCosts: lendingCostsString
         };
-
     } catch (error) {
         console.error(`Error fetching Aave data on ${chain}:`, error);
         return null;
@@ -422,18 +374,38 @@ async function getCoinGeckoChainIdMap() {
     console.log("Fetching CoinGecko network list for the first time...");
     const allNetworks = [];
     let url = `https://api.coingecko.com/api/v3/onchain/networks?x_cg_demo_api_key=CG-UVFFYYLSfEA26y4Dd31pYcLL`;
-    while (url) {
-        const res = await fetch(url);
-        const data = await res.json();
-        allNetworks.push(...data.data);
-        url = data.links.next;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
+
+    try {
+        while (url) {
+            console.log(`[DEBUG] Fetching page from URL: ${url}`);
+            const pageRes = await fetch(url, { signal: controller.signal });
+             if (!pageRes.ok) {
+                console.error(`[DEBUG] API for page responded with status: ${pageRes.status}`);
+                throw new Error(`API call failed with status ${pageRes.status}`);
+            }
+            const pageData = await pageRes.json();
+            allNetworks.push(...pageData.data);
+            url = pageData.links.next;
+        }
+        clearTimeout(timeoutId);
+        console.log(`[DEBUG] Finished fetching all pages. Total networks found: ${allNetworks.length}`);
+        const chainIdMap = {};
+        for (const network of allNetworks) {
+            chainIdMap[network.attributes.name] = network.id;
+        }
+        geckoChainIdCache.map = chainIdMap;
+        return chainIdMap;
+    } catch (error) {
+        clearTimeout(timeoutId);
+        if (error.name === 'AbortError') {
+            console.error("[DEBUG] ERROR: The request to CoinGecko timed out after 15 seconds.");
+        } else {
+            console.error("[DEBUG] ERROR: An error occurred while fetching the CoinGecko network list:", error);
+        }
+        return {};
     }
-    const chainIdMap = {};
-    for (const network of allNetworks) {
-        chainIdMap[network.attributes.name] = network.id;
-    }
-    geckoChainIdCache.map = chainIdMap;
-    return chainIdMap;
 }
 
 async function getCoinId(coingeckoChainId, tokenAddress) {
@@ -531,7 +503,6 @@ async function getPositionsData(walletAddress, chainName, coingeckoChainIdMap) {
         const [token0Addr, token1Addr] = await Promise.all([pool.token0(), pool.token1()]);
         const [t0, t1] = await Promise.all([getTokenMeta(token0Addr, provider), getTokenMeta(token1Addr, provider)]);
         
-        // UPDATED: Get current prices from CoinGecko
         if (coingeckochainid) {
             const coinId0 = await getCoinId(coingeckochainid, t0.address);
             const coinId1 = await getCoinId(coingeckochainid, t1.address);
@@ -803,19 +774,65 @@ async function handleSnapshotCommand(allPositionsData, chain, chatId) {
 
 // --- Telegram API Functions ---
 async function setTelegramMenuCommands() {
-    // ... (This function remains unchanged)
+    const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setMyCommands`;
+    const commands = [
+        { command: 'positions', description: 'Get a summary of your DeFi positions.' },
+        { command: 'snapshot', description: 'Get a visual snapshot of your Uniswap positions.' }
+    ];
+    try {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ commands })
+        });
+        const data = await response.json();
+        if (data.ok) {
+            console.log('Telegram menu commands were set successfully.');
+        } else {
+            console.error('Failed to set Telegram menu commands:', data.description);
+        }
+    } catch (error) {
+        console.error('Error setting Telegram menu commands:', error);
+    }
 }
 
 async function sendMessage(chatId, text) {
-    // ... (This function remains unchanged)
+    const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
+    try {
+        await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chat_id: chatId, text: text, parse_mode: 'Markdown' })
+        });
+    } catch (error) {
+        console.error('Failed to send Telegram message:', error);
+    }
 }
 
 async function sendPhoto(chatId, photoBuffer, caption = '') {
-    // ... (This function remains unchanged)
+    const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`;
+    const form = new FormData();
+    form.append('chat_id', chatId);
+    form.append('photo', photoBuffer, { filename: 'snapshot.png', contentType: 'image/png' });
+    form.append('caption', caption);
+    try {
+        await fetch(url, { method: 'POST', body: form });
+    } catch (error) {
+        console.error('Failed to send photo to Telegram:', error);
+    }
 }
 
 async function sendChatAction(chatId, action) {
-    // ... (This function remains unchanged)
+    const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendChatAction`;
+    try {
+        await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chat_id: chatId, action: action })
+        });
+    } catch (error) {
+        console.error('Failed to send chat action:', error);
+    }
 }
 
 // --- Express App Setup for Webhook ---
@@ -840,7 +857,7 @@ async function processTelegramCommand(update) {
     if (update.message) {
         const messageText = update.message.text;
         const chatId = update.message.chat.id;
-        const myAddress = addressToMonitor; // Use the globally defined address
+        const myAddress = addressToMonitor;
 
         const [command, chainArg] = messageText.split(' ');
         const chainName = chainArg?.toLowerCase();
@@ -848,12 +865,11 @@ async function processTelegramCommand(update) {
         try {
             if (command === '/positions' || command === '/snapshot') {
                 const chainsToQuery = chainName && chains[chainName] ? [chainName] : Object.keys(chains);
-
+                
                 await sendMessage(chatId, `Searching for positions on: *${chainsToQuery.join(', ')}*... This may take a moment.`);
                 if (command === '/positions') await sendChatAction(chatId, 'typing');
                 if (command === '/snapshot') await sendChatAction(chatId, 'upload_photo');
 
-                // Pre-fetch API data
                 const coingeckoChainIdMap = await getCoinGeckoChainIdMap();
 
                 const promises = chainsToQuery.map(async (chain) => {
@@ -877,12 +893,12 @@ async function processTelegramCommand(update) {
                         continue;
                     }
                     
-                    if (result.uniData.length > 0 || result.aaveData) {
+                    if ((result.uniData && result.uniData.length > 0) || result.aaveData) {
                          successfulChains++;
                     }
 
                     let chainMessage = "";
-                    if(result.uniData.length > 0) {
+                    if(result.uniData && result.uniData.length > 0) {
                         for (const posData of result.uniData) {
                             chainMessage += formatPositionData(posData, myAddress);
                             
