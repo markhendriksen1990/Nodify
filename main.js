@@ -1033,7 +1033,7 @@ async function processTelegramCommand(update) {
                 const startMessage = `Welcome! I am a Uniswap V3 & Aave V3 tracker.\n\n` +
                                      `Here are the available commands:\n` +
                                      `*/positions [chain]* - Get a detailed summary.\n` +
-                                     `*/snapshot [chain]* - Get an image snapshot (Uniswap only).\n\n` +
+                                     `*/snapshot [chain]* - Show off your gains.\n\n` +
                                      `If you don't specify a chain, I will search all supported chains.\n` +
                                      `Proudly coded by an amateur, Greetings! Orange\n\n` +
                                      `*Supported Chains:*\n` +
