@@ -16,6 +16,12 @@ BigInt.prototype.toJSON = function () {
     return this.toString();
 };
 
+// --- Configuration from Environment Variables ---
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const CHAT_ID = process.env.CHAT_ID;
+const RENDER_WEBHOOK_URL = process.env.RENDER_WEBHOOK_URL;
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
+
 // --- Ethers.js Provider and Contract Addresses ---
 const chains = {
     base: {
@@ -141,6 +147,18 @@ const UINT128_MAX = "340282366920938463463374607431768211455";
 const { formatUnits } = ethers;
 
 // --- UTILITY FUNCTIONS ---
+function formatElapsedDaysHours(ms) {
+    if (typeof ms !== 'number' || ms < 0) return '0 days, 0 hours';
+    const days = Math.floor(ms / (1000 * 60 * 60 * 24));
+    const hours = Math.floor((ms % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    return `${days} days, ${hours} hours`;
+}
+
+function tickToPrice(tick, t0, t1) {
+    const priceRatio = Math.pow(1.0001, Number(tick));
+    const decimalAdjustment = Math.pow(10, Number(t0.decimals) - Number(t1.decimals));
+    return priceRatio * decimalAdjustment;
+}
 
 function formatRelevantDecimals(number) {
     if (typeof number !== 'number' || isNaN(number)) return '0';
@@ -182,17 +200,9 @@ function formatHealthFactor(healthString) {
     }
 }
 
-function formatElapsedDaysHours(ms) {
-    if (typeof ms !== 'number' || ms < 0) return '0 days, 0 hours';
-    const days = Math.floor(ms / (1000 * 60 * 60 * 24));
-    const hours = Math.floor((ms % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-    return `${days} days, ${hours} hours`;
-}
-
-function tickToPrice(tick, t0, t1) {
-    const priceRatio = Math.pow(1.0001, Number(tick));
-    const decimalAdjustment = Math.pow(10, Number(t0.decimals) - Number(t1.decimals));
-    return priceRatio * decimalAdjustment;
+function formatTokenAmount(amount, decimals) {
+    if (typeof amount !== 'number' || isNaN(amount)) return '0.00';
+    return amount.toFixed(decimals);
 }
 
 function tickToSqrtPriceX96(tick) {
@@ -316,7 +326,6 @@ async function getAaveBorrowEvents(pool, provider, userAddress) {
     }
     return events;
 }
-
 async function getAaveData(walletAddress, chain) {
     const chainConfig = chains[chain]?.aave;
     if (!chainConfig || !chainConfig.poolAddress) {
@@ -405,8 +414,7 @@ async function getCoinGeckoChainIdMap() {
     const allNetworks = [];
     let url = `https://api.coingecko.com/api/v3/onchain/networks?x_cg_demo_api_key=CG-UVFFYYLSfEA26y4Dd31pYcLL`;
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
-
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
     try {
         while (url) {
             console.log(`[DEBUG] Fetching page from URL: ${url}`);
@@ -599,9 +607,10 @@ async function getPositionsData(walletAddress, chainName, coingeckoChainIdMap) {
 // --- Formatting Function ---
 function formatPositionData(data, walletAddress) {
     let message = "";
-    message += `\n${createHeader(`${data.chain.toUpperCase()} -- Position #${data.i}`)}\n`;
-    message += `🔹 Token ID: ${data.tokenId}\n`;
-    message += `🔸 Pool: ${data.t0.symbol}/${data.t1.symbol} (${Number(data.pos.fee) / 10000}% fee)\n`;
+    message += `\nWallet: ${walletAddress.substring(0,6)}...${walletAddress.substring(walletAddress.length - 4)}`;
+    message += `\n\n---------- ${data.chain.toUpperCase()} -- Position #${data.i} ----------\n`;
+    message += ` Token ID: ${data.tokenId}\n`;
+    message += ` Pool: ${data.t0.symbol}/${data.t1.symbol} (${Number(data.pos.fee) / 10000}% fee)\n`;
 
     if (data.positionHistoryAnalysisSucceeded) {
         const date = data.currentPositionStartDate;
@@ -610,11 +619,11 @@ function formatPositionData(data, walletAddress) {
         const year = date.getFullYear();
         const hours = date.getHours().toString().padStart(2, '0');
         const minutes = date.getMinutes().toString().padStart(2, '0');
-        message += `📅 Created: ${day}-${month}-${year} ${hours}:${minutes}\n`;
-        message += `💰 Initial Investment: ${formatUSD(data.histPrincipalUSD)}\n`;
+        message += ` Created: ${day}-${month}-${year} ${hours}:${minutes}\n`;
+        message += ` Initial Investment: ${formatUSD(data.histPrincipalUSD)}\n`;
     } else {
-        message += `📅 Created: (Date unavailable)\n`;
-        message += `💰 Initial Investment: (Unavailable)\n`;
+        message += ` Created: (Date unavailable)\n`;
+        message += ` Initial Investment: (Unavailable)\n`;
     }
 
     const lowerPrice = tickToPrice(data.pos.tickLower, data.t0, data.t1);
@@ -628,22 +637,22 @@ function formatPositionData(data, walletAddress) {
     const ratio1 = totalValue > 0 ? (value1 / totalValue) * 100 : 0;
 
     message += `\nPrice Information\n`;
-    message += `Range: ${formatRelevantDecimals(lowerPrice)} - ${formatRelevantDecimals(upperPrice)} ${data.t1.symbol}/${data.t0.symbol}\n`;
-    message += `Current Price: ${formatRelevantDecimals(currentPrice)} ${data.t1.symbol}/${data.t0.symbol}\n`;
-    message += `Ratio: ${data.t0.symbol}/${data.t1.symbol} \`${Math.round(ratio0)}%/${Math.round(ratio1)}%\`\n`;
+    message += ` Range: ${formatRelevantDecimals(lowerPrice)} - ${formatRelevantDecimals(upperPrice)} ${data.t1.symbol}/${data.t0.symbol}\n`;
+    message += ` Current Price: ${formatRelevantDecimals(currentPrice)} ${data.t1.symbol}/${data.t0.symbol}\n`;
+    message += ` Ratio: ${data.t0.symbol}/${data.t1.symbol} \`${Math.round(ratio0)}%/${Math.round(ratio1)}%\`\n`;
 
     const inRange = BigInt(data.nativeTick) >= BigInt(data.pos.tickLower) && BigInt(data.nativeTick) < BigInt(data.pos.tickUpper);
-    message += `📍 In Range? ${inRange ? "✅ Yes" : "❌❌❌ NO ❌❌❌"}\n`;
+    message += `  In Range?  ${inRange ? "Yes" : "No"}\n`;
 
     const holdingsUSD = value0 + value1;
     message += `\nCurrent Holdings\n`;
-    message += `🏛 ${formatRelevantDecimals(data.amt0)} ${data.t0.symbol} (${formatUSD(value0)})\n`;
-    message += `🏛 ${formatRelevantDecimals(data.amt1)} ${data.t1.symbol} (${formatUSD(value1)})\n`;
-    message += `🏛 Holdings: ${formatUSD(holdingsUSD)}\n`;
+    message += ` ${formatRelevantDecimals(data.amt0)} ${data.t0.symbol} (${formatUSD(value0)})\n`;
+    message += ` ${formatRelevantDecimals(data.amt1)} ${data.t1.symbol} (${formatUSD(value1)})\n`;
+    message += ` Holdings: ${formatUSD(holdingsUSD)}\n`;
 
     if (data.positionHistoryAnalysisSucceeded) {
         const holdingsChange = holdingsUSD - data.histPrincipalUSD;
-        message += `📈 Holdings change: ${formatUSD(holdingsChange)}\n`;
+        message += ` Holdings change: ${formatUSD(holdingsChange)}\n`;
     }
 
     const feeUSD0 = data.fee0 * data.t0.priceUSD;
@@ -651,9 +660,9 @@ function formatPositionData(data, walletAddress) {
     const totalFeesUSD = feeUSD0 + feeUSD1;
 
     message += `\nUncollected Fees\n`;
-    message += `💰 ${formatRelevantDecimals(data.fee0)} ${data.t0.symbol} (${formatUSD(feeUSD0)})\n`;
-    message += `💰 ${formatRelevantDecimals(data.fee1)} ${data.t1.symbol} (${formatUSD(feeUSD1)})\n`;
-    message += `💰 Total Fees: ${formatUSD(totalFeesUSD)}\n`;
+    message += ` ${formatRelevantDecimals(data.fee0)} ${data.t0.symbol} (${formatUSD(feeUSD0)})\n`;
+    message += ` ${formatRelevantDecimals(data.fee1)} ${data.t1.symbol} (${formatUSD(feeUSD1)})\n`;
+    message += ` Total Fees: ${formatUSD(totalFeesUSD)}\n`;
 
     if (data.positionHistoryAnalysisSucceeded && data.histPrincipalUSD > 0) {
         const now = new Date();
@@ -662,22 +671,22 @@ function formatPositionData(data, walletAddress) {
         const feesAPR = (rewardsPerYear / data.histPrincipalUSD) * 100;
 
         message += `\nFee Performance\n`;
-        message += `💧 Fees per hour: ${formatUSD(rewardsPerYear / 365.25 / 24)}\n`;
-        message += `💧 Fees per day: ${formatUSD(rewardsPerYear / 365.25)}\n`;
-        message += `💧 Fees per month: ${formatUSD(rewardsPerYear / 12)}\n`;
-        message += `💧 Fees per year: ${formatUSD(rewardsPerYear)}\n`;
-        message += `💧 Fees APR: ${feesAPR.toFixed(2)}%\n`;
+        message += ` Fees per hour: ${formatUSD(rewardsPerYear / 365.25 / 24)}\n`;
+        message += ` Fees per day: ${formatUSD(rewardsPerYear / 365.25)}\n`;
+        message += ` Fees per month: ${formatUSD(rewardsPerYear / 12)}\n`;
+        message += ` Fees per year: ${formatUSD(rewardsPerYear)}\n`;
+        message += ` Fees APR: ${feesAPR.toFixed(2)}%\n`;
     }
 
     const positionValue = holdingsUSD + totalFeesUSD;
-    message += `\n🏦 Position Value: ${formatUSD(positionValue)}\n`;
+    message += `\n Position Value: ${formatUSD(positionValue)}\n`;
     if (data.positionHistoryAnalysisSucceeded) {
         const totalReturn = positionValue - data.histPrincipalUSD;
-        message += `📈 Position Total return + Fees: ${formatUSD(totalReturn)}\n`;
+        message += ` Position Total return + Fees: ${formatUSD(totalReturn)}\n`;
     }
+
     return message;
 }
-
 
 // --- Execution Block (Now for Telegram Bot) ---
 const addressToMonitor = "0x2FD24cC510b7a40b176B05A5Bb628d024e3B6886";
