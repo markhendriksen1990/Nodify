@@ -371,7 +371,7 @@ async function getAaveData(walletAddress, chain) {
                         } catch (e) {
                             console.error(`--> Could not fetch APY for ${reserve.symbol}:`, e.message);
                         }
-                        borrowedAssetDetails.push(`• ${reserve.symbol}: $${formattedDebt.toFixed(2)} at ${apy.toFixed(2)}% APY (${debtType} rate)`);
+                        borrowedAssetDetails.push(`• ${reserve.symbol}: ${formattedDebt.toFixed(2)} @ ${apy.toFixed(2)}% APY (${debtType} rate)`);
                         weightedApySum += formattedDebt * apy;
                         totalBorrowValue += formattedDebt;
                     }
@@ -813,6 +813,7 @@ async function handleSnapshotCommand(allPositionsData, chain, chatId) {
 async function setTelegramMenuCommands() {
     const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setMyCommands`;
     const commands = [
+        { command: 'start', description: 'Info about this bot.' },
         { command: 'positions', description: 'Get a summary of your DeFi positions.' },
         { command: 'snapshot', description: 'Get a visual snapshot of your Uniswap positions.' }
     ];
@@ -957,7 +958,7 @@ async function processTelegramCommand(update) {
                         chainMessage += `\n${createHeader(`Aave Lending (${result.chain.toUpperCase()})`)}\n`;
                         chainMessage += `🔹 Total Collateral: ${result.aaveData.totalCollateral}  🔺 Total Debt: ${result.aaveData.totalDebt}\n`;
                         chainMessage += `Health Factor: ${formatHealthFactor(result.aaveData.healthFactor)}\n`;
-                        chainMessage += `Borrowed Assets:\n   🔺 ${result.aaveData.borrowedAssets.replace(/\•/g, '')}\n`;
+                        chainMessage += `🔺 Borrowed Assets: {result.aaveData.borrowedAssets.replace(/\•/g, '')}\n`;
                         chainMessage += `📉 Estimated Lending Costs: ${result.aaveData.lendingCosts}\n`;
                     }
                     allChainMessages += chainMessage;
