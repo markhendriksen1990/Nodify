@@ -16,12 +16,6 @@ BigInt.prototype.toJSON = function () {
     return this.toString();
 };
 
-// --- Configuration from Environment Variables ---
-const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const CHAT_ID = process.env.CHAT_ID;
-const RENDER_WEBHOOK_URL = process.env.RENDER_WEBHOOK_URL;
-const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
-
 // --- Ethers.js Provider and Contract Addresses ---
 const chains = {
     base: {
@@ -148,16 +142,13 @@ const { formatUnits } = ethers;
 
 // --- UTILITY FUNCTIONS ---
 
-// ADDED: New helper functions for formatting
 function formatRelevantDecimals(number) {
     if (typeof number !== 'number' || isNaN(number)) return '0';
-    // Format to a max of 6 decimal places and remove trailing zeros
     return parseFloat(number.toFixed(6)).toString();
 }
 
 function formatUSD(number) {
     if (typeof number !== 'number' || isNaN(number)) return '$0,00';
-    // Uses German locale to get '.' for thousands and ',' for decimal
     const formatted = number.toLocaleString('de-DE', {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2
@@ -166,14 +157,30 @@ function formatUSD(number) {
 }
 
 function createHeader(text) {
-    const totalWidth = 33; // Width of "====== OVERALL PERFORMANCE ======"
+    const totalWidth = 33;
     const textWidth = text.length;
-    const paddingWidth = totalWidth - textWidth - 2; // -2 for spaces
+    if (textWidth >= totalWidth) {
+        return text;
+    }
+    const paddingWidth = totalWidth - textWidth - 2;
     const leftPadding = Math.floor(paddingWidth / 2);
     const rightPadding = Math.ceil(paddingWidth / 2);
-    return `${'='.repeat(leftPadding)} ${text} ${'='.repeat(rightPadding)}`;
+    return `${'-'.repeat(leftPadding)} ${text} ${'-'.repeat(rightPadding)}`;
 }
 
+function formatHealthFactor(healthString) {
+    const [value, status] = healthString.split(' - ');
+    switch (status) {
+        case "Safe":
+            return `${value} - Safe ✅`;
+        case "Careful":
+            return `${value} - ⚠️ Careful ⚠️`;
+        case "DANGER":
+            return `${value} - 🚨🚨🚨🚨🚨 DANGER 🚨🚨🚨🚨🚨`;
+        default:
+            return healthString;
+    }
+}
 
 function formatElapsedDaysHours(ms) {
     if (typeof ms !== 'number' || ms < 0) return '0 days, 0 hours';
@@ -591,12 +598,10 @@ async function getPositionsData(walletAddress, chainName, coingeckoChainIdMap) {
 
 // --- Formatting Function ---
 function formatPositionData(data, walletAddress) {
-    // MODIFIED: Removed the duplicate "Wallet:" line
     let message = "";
-    // MODIFIED: Using the new createHeader function
     message += `\n${createHeader(`${data.chain.toUpperCase()} -- Position #${data.i}`)}\n`;
-    message += ` Token ID: ${data.tokenId}\n`;
-    message += ` Pool: ${data.t0.symbol}/${data.t1.symbol} (${Number(data.pos.fee) / 10000}% fee)\n`;
+    message += `🔹 Token ID: ${data.tokenId}\n`;
+    message += `🔸 Pool: ${data.t0.symbol}/${data.t1.symbol} (${Number(data.pos.fee) / 10000}% fee)\n`;
 
     if (data.positionHistoryAnalysisSucceeded) {
         const date = data.currentPositionStartDate;
@@ -605,12 +610,11 @@ function formatPositionData(data, walletAddress) {
         const year = date.getFullYear();
         const hours = date.getHours().toString().padStart(2, '0');
         const minutes = date.getMinutes().toString().padStart(2, '0');
-        message += ` Created: ${day}-${month}-${year} ${hours}:${minutes}\n`;
-        // MODIFIED: Using new formatUSD function
-        message += ` Initial Investment: ${formatUSD(data.histPrincipalUSD)}\n`;
+        message += `📅 Created: ${day}-${month}-${year} ${hours}:${minutes}\n`;
+        message += `💰 Initial Investment: ${formatUSD(data.histPrincipalUSD)}\n`;
     } else {
-        message += ` Created: (Date unavailable)\n`;
-        message += ` Initial Investment: (Unavailable)\n`;
+        message += `📅 Created: (Date unavailable)\n`;
+        message += `💰 Initial Investment: (Unavailable)\n`;
     }
 
     const lowerPrice = tickToPrice(data.pos.tickLower, data.t0, data.t1);
@@ -624,25 +628,22 @@ function formatPositionData(data, walletAddress) {
     const ratio1 = totalValue > 0 ? (value1 / totalValue) * 100 : 0;
 
     message += `\nPrice Information\n`;
-    // MODIFIED: Using new formatRelevantDecimals function and removed '$'
-    message += ` Range: ${formatRelevantDecimals(lowerPrice)} - ${formatRelevantDecimals(upperPrice)} ${data.t1.symbol}/${data.t0.symbol}\n`;
-    message += ` Current Price: ${formatRelevantDecimals(currentPrice)} ${data.t1.symbol}/${data.t0.symbol}\n`;
-    // MODIFIED: Wrapped ratio in backticks to fix Telegram link issue
-    message += ` Ratio: ${data.t0.symbol}/${data.t1.symbol} \`${Math.round(ratio0)}%/${Math.round(ratio1)}%\`\n`;
+    message += `Range: ${formatRelevantDecimals(lowerPrice)} - ${formatRelevantDecimals(upperPrice)} ${data.t1.symbol}/${data.t0.symbol}\n`;
+    message += `Current Price: ${formatRelevantDecimals(currentPrice)} ${data.t1.symbol}/${data.t0.symbol}\n`;
+    message += `Ratio: ${data.t0.symbol}/${data.t1.symbol} \`${Math.round(ratio0)}%/${Math.round(ratio1)}%\`\n`;
 
     const inRange = BigInt(data.nativeTick) >= BigInt(data.pos.tickLower) && BigInt(data.nativeTick) < BigInt(data.pos.tickUpper);
-    message += `  In Range?  ${inRange ? "Yes" : "No"}\n`;
+    message += `📍 In Range? ${inRange ? "✅ Yes" : "❌❌❌ NO ❌❌❌"}\n`;
 
     const holdingsUSD = value0 + value1;
     message += `\nCurrent Holdings\n`;
-    // MODIFIED: Using new formatting functions
-    message += ` ${formatRelevantDecimals(data.amt0)} ${data.t0.symbol} (${formatUSD(value0)})\n`;
-    message += ` ${formatRelevantDecimals(data.amt1)} ${data.t1.symbol} (${formatUSD(value1)})\n`;
-    message += ` Holdings: ${formatUSD(holdingsUSD)}\n`;
+    message += `🏛 ${formatRelevantDecimals(data.amt0)} ${data.t0.symbol} (${formatUSD(value0)})\n`;
+    message += `🏛 ${formatRelevantDecimals(data.amt1)} ${data.t1.symbol} (${formatUSD(value1)})\n`;
+    message += `🏛 Holdings: ${formatUSD(holdingsUSD)}\n`;
 
     if (data.positionHistoryAnalysisSucceeded) {
         const holdingsChange = holdingsUSD - data.histPrincipalUSD;
-        message += ` Holdings change: ${formatUSD(holdingsChange)}\n`;
+        message += `📈 Holdings change: ${formatUSD(holdingsChange)}\n`;
     }
 
     const feeUSD0 = data.fee0 * data.t0.priceUSD;
@@ -650,10 +651,9 @@ function formatPositionData(data, walletAddress) {
     const totalFeesUSD = feeUSD0 + feeUSD1;
 
     message += `\nUncollected Fees\n`;
-    // MODIFIED: Using new formatting functions
-    message += ` ${formatRelevantDecimals(data.fee0)} ${data.t0.symbol} (${formatUSD(feeUSD0)})\n`;
-    message += ` ${formatRelevantDecimals(data.fee1)} ${data.t1.symbol} (${formatUSD(feeUSD1)})\n`;
-    message += ` Total Fees: ${formatUSD(totalFeesUSD)}\n`;
+    message += `💰 ${formatRelevantDecimals(data.fee0)} ${data.t0.symbol} (${formatUSD(feeUSD0)})\n`;
+    message += `💰 ${formatRelevantDecimals(data.fee1)} ${data.t1.symbol} (${formatUSD(feeUSD1)})\n`;
+    message += `💰 Total Fees: ${formatUSD(totalFeesUSD)}\n`;
 
     if (data.positionHistoryAnalysisSucceeded && data.histPrincipalUSD > 0) {
         const now = new Date();
@@ -662,22 +662,22 @@ function formatPositionData(data, walletAddress) {
         const feesAPR = (rewardsPerYear / data.histPrincipalUSD) * 100;
 
         message += `\nFee Performance\n`;
-        // MODIFIED: Using new formatUSD function
-        message += ` Fees per hour: ${formatUSD(rewardsPerYear / 365.25 / 24)}\n`;
-        message += ` Fees per day: ${formatUSD(rewardsPerYear / 365.25)}\n`;
-        message += ` Fees per month: ${formatUSD(rewardsPerYear / 12)}\n`;
-        message += ` Fees per year: ${formatUSD(rewardsPerYear)}\n`;
-        message += ` Fees APR: ${feesAPR.toFixed(2)}%\n`;
+        message += `💧 Fees per hour: ${formatUSD(rewardsPerYear / 365.25 / 24)}\n`;
+        message += `💧 Fees per day: ${formatUSD(rewardsPerYear / 365.25)}\n`;
+        message += `💧 Fees per month: ${formatUSD(rewardsPerYear / 12)}\n`;
+        message += `💧 Fees per year: ${formatUSD(rewardsPerYear)}\n`;
+        message += `💧 Fees APR: ${feesAPR.toFixed(2)}%\n`;
     }
 
     const positionValue = holdingsUSD + totalFeesUSD;
-    message += `\n Position Value: ${formatUSD(positionValue)}\n`;
+    message += `\n🏦 Position Value: ${formatUSD(positionValue)}\n`;
     if (data.positionHistoryAnalysisSucceeded) {
         const totalReturn = positionValue - data.histPrincipalUSD;
-        message += ` Position Total return + Fees: ${formatUSD(totalReturn)}\n`;
+        message += `📈 Position Total return + Fees: ${formatUSD(totalReturn)}\n`;
     }
     return message;
 }
+
 
 // --- Execution Block (Now for Telegram Bot) ---
 const addressToMonitor = "0x2FD24cC510b7a40b176B05A5Bb628d024e3B6886";
@@ -804,7 +804,6 @@ async function handleSnapshotCommand(allPositionsData, chain, chatId) {
 async function setTelegramMenuCommands() {
     const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setMyCommands`;
     const commands = [
-        { command: 'start', description: 'Info about this bot.' },
         { command: 'positions', description: 'Get a summary of your DeFi positions.' },
         { command: 'snapshot', description: 'Get a visual snapshot of your Uniswap positions.' }
     ];
@@ -916,8 +915,8 @@ async function processTelegramCommand(update) {
                 for (const result of results) {
                     if ((result.uniData?.error) || (result.aaveData?.error)) {
                         failedChains.push(result.chain);
-                        if(result.uniData?.error) console.error(`Failed to fetch Uniswap data for ${result.chain}:`, result.uniData.error);
-                        if(result.aaveData?.error) console.error(`Failed to fetch Aave data for ${result.chain}:`, result.aaveData.error);
+                        if (result.uniData?.error) console.error(`Failed to fetch Uniswap data for ${result.chain}:`, result.uniData.error);
+                        if (result.aaveData?.error) console.error(`Failed to fetch Aave data for ${result.chain}:`, result.aaveData.error);
                         continue;
                     }
                     
@@ -926,9 +925,9 @@ async function processTelegramCommand(update) {
                     }
 
                     let chainMessage = "";
-                    if(result.uniData && result.uniData.length > 0) {
+                    if (result.uniData && result.uniData.length > 0) {
                         for (const posData of result.uniData) {
-                            chainMessage += formatPositionData(posData, myAddress); // Using the formatter here
+                            chainMessage += formatPositionData(posData, myAddress);
                             
                             if (posData.positionHistoryAnalysisSucceeded) {
                                 if (!grandOverallData.startDate || posData.currentPositionStartDate.getTime() < grandOverallData.startDate.getTime()) {
@@ -945,13 +944,12 @@ async function processTelegramCommand(update) {
                             grandOverallData.totalPositions++;
                         }
                     }
-                    if(result.aaveData) {
-                        // MODIFIED: Using new createHeader function for consistency
+                    if (result.aaveData) {
                         chainMessage += `\n${createHeader(`Aave Lending (${result.chain.toUpperCase()})`)}\n`;
-                        chainMessage += `Total Collateral: ${result.aaveData.totalCollateral}  Total Debt: ${result.aaveData.totalDebt}\n`;
-                        chainMessage += `Health Factor: ${result.aaveData.healthFactor}\n`;
-                        chainMessage += `Borrowed Assets:\n   ${result.aaveData.borrowedAssets}\n`;
-                        chainMessage += `Estimated Lending Costs: ${result.aaveData.lendingCosts}\n`;
+                        chainMessage += `🔹 Total Collateral: ${result.aaveData.totalCollateral}  🔺 Total Debt: ${result.aaveData.totalDebt}\n`;
+                        chainMessage += `Health Factor: ${formatHealthFactor(result.aaveData.healthFactor)}\n`;
+                        chainMessage += `Borrowed Assets:\n   🔺 ${result.aaveData.borrowedAssets.replace(/\•/g, '')}\n`;
+                        chainMessage += `📉 Estimated Lending Costs: ${result.aaveData.lendingCosts}\n`;
                     }
                     allChainMessages += chainMessage;
                 }
@@ -968,9 +966,7 @@ async function processTelegramCommand(update) {
                         const rewardsPerYear = elapsedMs > 0 ? grandOverallData.totalFeeUSD * (365.25 * 24 * 60 * 60 * 1000) / elapsedMs : 0;
                         const feesAPR = (rewardsPerYear / grandOverallData.startPrincipalUSD) * 100;
 
-                        // MODIFIED: Using new createHeader and formatUSD functions
                         finalMessage += `\n${createHeader("OVERALL PERFORMANCE")}\n`;
-                        // MODIFIED: Text changed as requested
                         finalMessage += `(Based on the *${grandOverallData.totalPositions}* displayed position(s) with value)\n`;
                         finalMessage += `🏛 Initial Investment: ${formatUSD(grandOverallData.startPrincipalUSD)}\n`;
                         finalMessage += `🏛 Total Holdings: ${formatUSD(grandOverallData.totalPortfolioPrincipalUSD)}\n`;
@@ -996,10 +992,42 @@ async function processTelegramCommand(update) {
                 }
 
             } else if (command === '/snapshot') {
-                // ... (This block remains unchanged)
+                const chainsToQuery = chainName && chains[chainName] ? [chainName] : Object.keys(chains);
+                
+                await sendMessage(chatId, `Generating snapshots for: *${chainsToQuery.join(', ')}*...`);
+                await sendChatAction(chatId, 'upload_photo');
+                
+                const coingeckoChainIdMap = await getCoinGeckoChainIdMap();
+                
+                const promises = chainsToQuery.map(chain => getPositionsData(myAddress, chain, coingeckoChainIdMap).then(data => ({ chain, data, status: 'fulfilled' })).catch(error => ({ chain, error, status: 'rejected' })));
+                const results = await Promise.all(promises);
+
+                let successfulChains = 0;
+                let failedChains = [];
+                for (const result of results) {
+                    if (result.status === 'fulfilled' && result.data.length > 0) {
+                        successfulChains++;
+                        await handleSnapshotCommand(result.data, result.chain, chatId);
+                    } else if (result.status === 'rejected') {
+                        failedChains.push(result.chain);
+                        console.error(`Failed to fetch data for ${result.chain}:`, result.error);
+                    }
+                }
+                if (successfulChains === 0 && failedChains.length === 0) {
+                    await sendMessage(chatId, "No active Uniswap V3 positions found to snapshot.");
+                } else if (failedChains.length > 0) {
+                    await sendMessage(chatId, `\n\n⚠️ Could not fetch data for snapshots on: *${failedChains.join(', ')}*.`);
+                }
 
             } else if (command === '/start') {
-                // ... (This block remains unchanged)
+                const startMessage = `Welcome! I am a Uniswap V3 & Aave V3 tracker.\n\n` +
+                                     `Here are the available commands:\n` +
+                                     `*/positions [chain]* - Get a detailed summary.\n` +
+                                     `*/snapshot [chain]* - Get an image snapshot (Uniswap only).\n\n` +
+                                     `If you don't specify a chain, I will search all supported chains.\n\n` +
+                                     `*Supported Chains:*\n` +
+                                     Object.keys(chains).join(', ');
+                await sendMessage(chatId, startMessage);
             } else {
                 await sendMessage(chatId, "I only understand the /positions and /snapshot commands. Please select one from the menu.");
             }
