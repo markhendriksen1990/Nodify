@@ -844,10 +844,12 @@ async function setTelegramMenuCommands() {
 async function sendMessage(chatId, text) {
     const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
     try {
+        // Wrap the entire message in a MarkdownV2 code block to preserve spacing
+        const formattedText = "```\n" + text + "\n```";
         await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ chat_id: chatId, text: text, parse_mode: 'Markdown' })
+            body: JSON.stringify({ chat_id: chatId, text: formattedText, parse_mode: 'MarkdownV2' })
         });
     } catch (error) {
         console.error('Failed to send Telegram message:', error);
@@ -966,13 +968,13 @@ async function processTelegramCommand(update) {
                         chainMessage += `🔹 Total Collateral: ${result.aaveData.totalCollateral}  🔺 Total Debt: ${result.aaveData.totalDebt}\n`;
                         chainMessage += `Health Factor: ${formatHealthFactor(result.aaveData.healthFactor)}\n`;
                         // --- CORRECTED LINE ---
-                        chainMessage += `Borrowed Assets:\n   ${result.aaveData.borrowedAssets.replace(/•/g, '🔺')}\n`;
+                        chainMessage += `Borrowed Assets:\n${result.aaveData.borrowedAssets.replace(/•/g, '   🔺')}\n`;
                         chainMessage += `📉 Estimated Lending Costs: ${result.aaveData.lendingCosts}\n`;
                     }
                     allChainMessages += chainMessage;
                 }
                 
-                let finalMessage = `*👜 Wallet: ${myAddress.substring(0, 6)}...${myAddress.substring(myAddress.length - 4)}*\n`;
+                let finalMessage = `👜 Wallet: ${myAddress.substring(0, 6)}...${myAddress.substring(myAddress.length - 4)}\n`;
                 
                 if (allChainMessages) {
                     finalMessage += allChainMessages;
