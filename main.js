@@ -178,6 +178,10 @@ function createHeader(text) {
     return `${'-'.repeat(leftPadding)} ${text} ${'-'.repeat(rightPadding)}`;
 }
 
+function padString(str, length) {
+    return str.padEnd(length, ' ');
+}
+
 function formatHealthFactor(healthString) {
     const [value, status] = healthString.split(' - ');
     switch (status) {
@@ -605,7 +609,6 @@ async function getPositionsData(walletAddress, chainName, coingeckoChainIdMap) {
     return positionsData;
 }
 
-// --- Formatting Function ---
 function formatPositionData(data, walletAddress) {
     let message = "";
     message += `\n${createHeader(`${data.chain.toUpperCase()} -- Position #${data.i}`)}\n`;
@@ -646,8 +649,10 @@ function formatPositionData(data, walletAddress) {
 
     const holdingsUSD = value0 + value1;
     message += `\nCurrent Holdings\n`;
-    message += `🏛 ${formatSignificant(data.amt0)} ${data.t0.symbol} (${formatUSD(value0)})\n`;
-    message += `🏛 ${formatSignificant(data.amt1)} ${data.t1.symbol} (${formatUSD(value1)})\n`;
+    const holdingsStr0 = `🏛 ${formatSignificant(data.amt0)} ${data.t0.symbol}`;
+    message += `${padString(holdingsStr0, 25)} (${formatUSD(value0)})\n`;
+    const holdingsStr1 = `🏛 ${formatSignificant(data.amt1)} ${data.t1.symbol}`;
+    message += `${padString(holdingsStr1, 25)} (${formatUSD(value1)})\n`;
     message += `🏛 Holdings: ${formatUSD(holdingsUSD)}\n`;
 
     if (data.positionHistoryAnalysisSucceeded) {
@@ -660,8 +665,10 @@ function formatPositionData(data, walletAddress) {
     const totalFeesUSD = feeUSD0 + feeUSD1;
 
     message += `\nUncollected Fees\n`;
-    message += `💰 ${formatSignificant(data.fee0)} ${data.t0.symbol} (${formatUSD(feeUSD0)})\n`;
-    message += `💰 ${formatSignificant(data.fee1)} ${data.t1.symbol} (${formatUSD(feeUSD1)})\n`;
+    const feeStr0 = `💰 ${formatSignificant(data.fee0)} ${data.t0.symbol}`;
+    message += `${padString(feeStr0, 25)} (${formatUSD(feeUSD0)})\n`;
+    const feeStr1 = `💰 ${formatSignificant(data.fee1)} ${data.t1.symbol}`;
+    message += `${padString(feeStr1, 25)} (${formatUSD(feeUSD1)})\n`;
     message += `💰 Total Fees: ${formatUSD(totalFeesUSD)}\n`;
 
     if (data.positionHistoryAnalysisSucceeded && data.histPrincipalUSD > 0) {
@@ -671,10 +678,10 @@ function formatPositionData(data, walletAddress) {
         const feesAPR = (rewardsPerYear / data.histPrincipalUSD) * 100;
 
         message += `\nFee Performance\n`;
-        message += `💧 Fees per hour: ${formatUSD(rewardsPerYear / 365.25 / 24)}\n`;
-        message += `💧 Fees per day: ${formatUSD(rewardsPerYear / 365.25)}\n`;
-        message += `💧 Fees per month: ${formatUSD(rewardsPerYear / 12)}\n`;
-        message += `💧 Fees per year: ${formatUSD(rewardsPerYear)}\n`;
+        message += `${padString('💧 Fees per hour:', 25)} ${formatUSD(rewardsPerYear / 365.25 / 24)}\n`;
+        message += `${padString('💧 Fees per day:', 25)} ${formatUSD(rewardsPerYear / 365.25)}\n`;
+        message += `${padString('💧 Fees per month:', 25)} ${formatUSD(rewardsPerYear / 12)}\n`;
+        message += `${padString('💧 Fees per year:', 25)} ${formatUSD(rewardsPerYear)}\n`;
         message += `💧 Fees APR: ${feesAPR.toFixed(2)}%\n`;
     }
 
@@ -958,7 +965,8 @@ async function processTelegramCommand(update) {
                         chainMessage += `\n${createHeader(`Aave Lending (${result.chain.toUpperCase()})`)}\n`;
                         chainMessage += `🔹 Total Collateral: ${result.aaveData.totalCollateral}  🔺 Total Debt: ${result.aaveData.totalDebt}\n`;
                         chainMessage += `Health Factor: ${formatHealthFactor(result.aaveData.healthFactor)}\n`;
-                        chainMessage += `🔺 Borrowed Assets: {result.aaveData.borrowedAssets.replace(/\•/g, '')}\n`;
+                        // --- CORRECTED LINE ---
+                        chainMessage += `Borrowed Assets:\n   ${result.aaveData.borrowedAssets.replace(/•/g, '🔺')}\n`;
                         chainMessage += `📉 Estimated Lending Costs: ${result.aaveData.lendingCosts}\n`;
                     }
                     allChainMessages += chainMessage;
@@ -1033,9 +1041,8 @@ async function processTelegramCommand(update) {
                 const startMessage = `Welcome! I am a Uniswap V3 & Aave V3 tracker.\n\n` +
                                      `Here are the available commands:\n` +
                                      `*/positions [chain]* - Get a detailed summary.\n` +
-                                     `*/snapshot [chain]* - Show off your gains.\n\n` +
-                                     `If you don't specify a chain, I will search all supported chains.\n` +
-                                     `Proudly coded by an amateur, Greetings! Orange\n\n` +
+                                     `*/snapshot [chain]* - Get an image snapshot (Uniswap only).\n\n` +
+                                     `If you don't specify a chain, I will search all supported chains.\n\n` +
                                      `*Supported Chains:*\n` +
                                      Object.keys(chains).join(', ');
                 await sendMessage(chatId, startMessage);
