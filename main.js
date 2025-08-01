@@ -805,8 +805,10 @@ async function handleSnapshotCommand(allPositionsData, chain, chatId) {
             holdingsChange: holdingsChange,
             t0Symbol: data.t0.symbol,
             t1Symbol: data.t1.symbol,
-            fees0: formatTokenAmount(data.fee0, 6),
-            fees1: formatTokenAmount(data.fee1, 2),
+            // --- CORRECTED LINES ---
+            // Replaced the old formatTokenAmount with the correct formatSignificant function
+            fees0: formatSignificant(data.fee0),
+            fees1: formatSignificant(data.fee1),
             totalFees: `$${totalPositionFeesUSD.toFixed(2)}`,
             feesAPR: feesAPR
         };
