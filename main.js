@@ -650,9 +650,9 @@ function formatPositionData(data, walletAddress) {
     const holdingsUSD = value0 + value1;
     message += `\nCurrent Holdings\n`;
     const holdingsStr0 = `🏛 ${formatSignificant(data.amt0)} ${data.t0.symbol}`;
-    message += `${padString(holdingsStr0, 25)} (${formatUSD(value0)})\n`;
+    message += `${padString(holdingsStr0, 25)} ${formatUSD(value0)}\n`;
     const holdingsStr1 = `🏛 ${formatSignificant(data.amt1)} ${data.t1.symbol}`;
-    message += `${padString(holdingsStr1, 25)} (${formatUSD(value1)})\n`;
+    message += `${padString(holdingsStr1, 25)} ${formatUSD(value1)}\n`;
     message += `🏛 Holdings: ${formatUSD(holdingsUSD)}\n`;
 
     if (data.positionHistoryAnalysisSucceeded) {
@@ -666,9 +666,9 @@ function formatPositionData(data, walletAddress) {
 
     message += `\nUncollected Fees\n`;
     const feeStr0 = `💰 ${formatSignificant(data.fee0)} ${data.t0.symbol}`;
-    message += `${padString(feeStr0, 25)} (${formatUSD(feeUSD0)})\n`;
+    message += `${padString(feeStr0, 25)} ${formatUSD(feeUSD0)}\n`;
     const feeStr1 = `💰 ${formatSignificant(data.fee1)} ${data.t1.symbol}`;
-    message += `${padString(feeStr1, 25)} (${formatUSD(feeUSD1)})\n`;
+    message += `${padString(feeStr1, 25)} ${formatUSD(feeUSD1)}\n`;
     message += `💰 Total Fees: ${formatUSD(totalFeesUSD)}\n`;
 
     if (data.positionHistoryAnalysisSucceeded && data.histPrincipalUSD > 0) {
