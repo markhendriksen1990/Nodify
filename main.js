@@ -197,7 +197,7 @@ function formatHealthFactor(healthString) {
 }
 
 function formatElapsedDaysHours(ms) {
-    if (typeof ms !== 'number' || ms < 0) return '0 days, 0 hours';
+    if (typeof ms !== 'number' || ms < 0) return '0 d, 0 h';
     const days = Math.floor(ms / (1000 * 60 * 60 * 24));
     const hours = Math.floor((ms % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
     return `${days} days, ${hours} hours`;
@@ -349,7 +349,7 @@ async function getAaveData(walletAddress, chain) {
         if (healthFactor < 1.5) healthStatus = "Careful";
         if (healthFactor < 1.1) healthStatus = "DANGER";
         let borrowedAssetsString = "None";
-        let lendingCostsString = "$0.00 over 0 days";
+        let lendingCostsString = "$0.00 over 0 d";
         if (accountData.totalDebtBase.toString() > '0') {
             const allReserves = await dataProvider.getAllReservesTokens();
             let borrowedAssetDetails = [];
@@ -640,12 +640,12 @@ function formatPositionData(data, walletAddress) {
     const ratio1 = totalValue > 0 ? (value1 / totalValue) * 100 : 0;
 
     message += `\nPrice Information\n`;
-    message += `${padString('Range:', 25)} ${formatSignificant(lowerPrice)} - ${formatSignificant(upperPrice)} ${data.t1.symbol}/${data.t0.symbol}\n`;
-    message += `${padString('Current Price:', 25)} ${formatSignificant(currentPrice)} ${data.t1.symbol}/${data.t0.symbol}\n`;
-    message += `${padString('Ratio:', 25)} ${data.t0.symbol}/${data.t1.symbol} \`${Math.round(ratio0)}%/${Math.round(ratio1)}%\`\n`;
+    message += `${padString('Range:', 17)} ${formatSignificant(lowerPrice)} - ${formatSignificant(upperPrice)} ${data.t1.symbol}/${data.t0.symbol}\n`;
+    message += `${padString('Current Price:', 17)} ${formatSignificant(currentPrice)} ${data.t1.symbol}/${data.t0.symbol}\n`;
+    message += `${padString('Ratio:', 17)} ${data.t0.symbol}/${data.t1.symbol} \`${Math.round(ratio0)}%/${Math.round(ratio1)}%\`\n`;
 
     const inRange = BigInt(data.nativeTick) >= BigInt(data.pos.tickLower) && BigInt(data.nativeTick) < BigInt(data.pos.tickUpper);
-    message += `${padString('📍 In Range?', 25)} ${inRange ? "✅ Yes" : "❌❌❌ NO ❌❌❌"}\n`;
+    message += `${padString('📍 In Range?', 17)} ${inRange ? "✅ Yes" : "❌❌❌ NO ❌❌❌"}\n`;
 
     const holdingsUSD = value0 + value1;
     message += `\nCurrent Holdings\n`;
@@ -971,7 +971,7 @@ async function processTelegramCommand(update) {
                         chainMessage += `Health Factor: ${formatHealthFactor(result.aaveData.healthFactor)}\n`;
                         // --- CORRECTED LINE ---
                         chainMessage += `Borrowed Assets:\n${result.aaveData.borrowedAssets.replace(/•/g, '🔺')}\n`;
-                        chainMessage += `📉 Estimated Lending Costs: ${result.aaveData.lendingCosts}\n`;
+                        chainMessage += `📉 Lending Costs: ${result.aaveData.lendingCosts}\n`;
                     }
                     allChainMessages += chainMessage;
                 }
