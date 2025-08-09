@@ -970,7 +970,7 @@ async function processTelegramCommand(update) {
                         chainMessage += `🔹 Total Collateral: ${result.aaveData.totalCollateral}\n🔺 Total Debt: ${result.aaveData.totalDebt}\n`;
                         chainMessage += `Health Factor: ${formatHealthFactor(result.aaveData.healthFactor)}\n`;
                         // --- CORRECTED LINE ---
-                        chainMessage += `Borrowed Assets:\n${result.aaveData.borrowedAssets.replace(/•/g, '   🔺')}\n`;
+                        chainMessage += `Borrowed Assets:\n${result.aaveData.borrowedAssets.replace(/•/g, '🔺')}\n`;
                         chainMessage += `📉 Estimated Lending Costs: ${result.aaveData.lendingCosts}\n`;
                     }
                     allChainMessages += chainMessage;
