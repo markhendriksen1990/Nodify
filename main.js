@@ -999,7 +999,7 @@ async function processTelegramCommand(update) {
                         finalMessage += `${padString('💰 Fees APR:', 25)} ${feesAPR.toFixed(2)}%\n`;
 
                         const allTimeGains = totalReturn + grandOverallData.totalFeeUSD;
-                        finalMessage += `${padString('\n📈 Total return + Fees:', 25)} ${formatUSD(allTimeGains)}\n`;
+                        finalMessage += `${padString('\n📈 Total return + Fees:', 26)} ${formatUSD(allTimeGains)}\n`;
                     }
                 }
                 
