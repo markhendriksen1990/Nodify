@@ -967,9 +967,9 @@ async function processTelegramCommand(update) {
                     }
                     if(result.aaveData) {
                         chainMessage += `\n${createHeader(`Aave Lending (${result.chain.toUpperCase()})`)}\n`;
-                        chainMessage += `🔹 Total Collateral: ${result.aaveData.totalCollateral}\n🔺 Total Debt: ${result.aaveData.totalDebt}\n`;
-                        chainMessage += `Health Factor: ${formatHealthFactor(result.aaveData.healthFactor)}\n`;
-                        // --- CORRECTED LINE ---
+                        chainMessage += `${padString('🔹 Total Collateral:', 25)} ${result.aaveData.totalCollateral}\n`;
+                        chainMessage += `${padString('🔺 Total Debt:', 25)} ${result.aaveData.totalDebt}\n`;
+                        chainMessage += `${padString('Health Factor:', 25)} ${formatHealthFactor(result.aaveData.healthFactor)}\n`;
                         chainMessage += `Borrowed Assets:\n${result.aaveData.borrowedAssets.replace(/•/g, '🔺')}\n`;
                         chainMessage += `📉 Lending Costs: ${result.aaveData.lendingCosts}\n`;
                     }
@@ -989,17 +989,17 @@ async function processTelegramCommand(update) {
                         const feesAPR = (rewardsPerYear / grandOverallData.startPrincipalUSD) * 100;
 
                         finalMessage += `\n${createHeader("OVERALL PERFORMANCE")}\n`;
-                        finalMessage += `(Based on the *${grandOverallData.totalPositions}* displayed position(s) with value)\n`;
-                        finalMessage += `🏛 Initial Investment: ${formatUSD(grandOverallData.startPrincipalUSD)}\n`;
-                        finalMessage += `🏛 Total Holdings: ${formatUSD(grandOverallData.totalPortfolioPrincipalUSD)}\n`;
-                        finalMessage += `📈 Holdings Change: ${formatUSD(totalReturn)} (${totalReturnPercent.toFixed(2)}%)\n`;
+                        finalMessage += `(${grandOverallData.totalPositions} position(s) with value)\n`;
+                        finalMessage += `${padString('🏛 Initial Investment:', 25)} ${formatUSD(grandOverallData.startPrincipalUSD)}\n`;
+                        finalMessage += `${padString('🏛 Total Holdings:', 25)} ${formatUSD(grandOverallData.totalPortfolioPrincipalUSD)}\n`;
+                        finalMessage += `${padString('📈 Holdings Change:', 25)} ${formatUSD(totalReturn)} (${totalReturnPercent.toFixed(2)}%)\n`;
 
                         finalMessage += `\n*Fee Performance*\n`;
-                        finalMessage += `💰 Total Fees Earned: ${formatUSD(grandOverallData.totalFeeUSD)}\n`;
-                        finalMessage += `💰 Fees APR: ${feesAPR.toFixed(2)}%\n`;
+                        finalMessage += `${padString('💰 Total Fees Earned:', 25)} ${formatUSD(grandOverallData.totalFeeUSD)}\n`;
+                        finalMessage += `${padString('💰 Fees APR:', 25)} ${feesAPR.toFixed(2)}%\n`;
 
                         const allTimeGains = totalReturn + grandOverallData.totalFeeUSD;
-                        finalMessage += `\n📈 Total return + Fees: ${formatUSD(allTimeGains)}\n`;
+                        finalMessage += `${padString('\n📈 Total return + Fees:', 25)} ${formatUSD(allTimeGains)}\n`;
                     }
                 }
                 
