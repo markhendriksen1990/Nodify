@@ -686,7 +686,7 @@ function formatPositionData(data, walletAddress) {
     }
 
     const positionValue = holdingsUSD + totalFeesUSD;
-    message += `${padString('\n🏦 Position Value:', 25)} ${formatUSD(positionValue)}\n`;
+    message += `${padString('\n🏦 Position Value:', 26)} ${formatUSD(positionValue)}\n`;
     if (data.positionHistoryAnalysisSucceeded) {
         const totalReturn = positionValue - data.histPrincipalUSD;
         message += `${padString('📈 Position return+Fees:', 25)} ${formatUSD(totalReturn)}\n`;
