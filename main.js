@@ -612,8 +612,8 @@ async function getPositionsData(walletAddress, chainName, coingeckoChainIdMap) {
 function formatPositionData(data, walletAddress) {
     let message = "";
     message += `\n${createHeader(`${data.chain.toUpperCase()} -- Position #${data.i}`)}\n`;
-    message += `🔹 Token ID: ${data.tokenId}\n`;
-    message += `🔸 Pool: ${data.t0.symbol}/${data.t1.symbol} (${Number(data.pos.fee) / 10000}% fee)\n`;
+    message += `${padString('🔹 Token ID:', 25)} ${data.tokenId}\n`;
+    message += `${padString('🔸 Pool:', 25)} ${data.t0.symbol}/${data.t1.symbol} (${Number(data.pos.fee) / 10000}% fee)\n`;
 
     if (data.positionHistoryAnalysisSucceeded) {
         const date = data.currentPositionStartDate;
@@ -622,8 +622,8 @@ function formatPositionData(data, walletAddress) {
         const year = date.getFullYear();
         const hours = date.getHours().toString().padStart(2, '0');
         const minutes = date.getMinutes().toString().padStart(2, '0');
-        message += `📅 Created: ${day}-${month}-${year} ${hours}:${minutes}\n`;
-        message += `💰 Initial Investment: ${formatUSD(data.histPrincipalUSD)}\n`;
+        message += `${padString('📅 Created:', 25)} ${day}-${month}-${year} ${hours}:${minutes}\n`;
+        message += `${padString('💰 Initial Investment:', 25)} ${formatUSD(data.histPrincipalUSD)}\n`;
     } else {
         message += `📅 Created: (Date unavailable)\n`;
         message += `💰 Initial Investment: (Unavailable)\n`;
@@ -640,12 +640,12 @@ function formatPositionData(data, walletAddress) {
     const ratio1 = totalValue > 0 ? (value1 / totalValue) * 100 : 0;
 
     message += `\nPrice Information\n`;
-    message += `Range: ${formatSignificant(lowerPrice)} - ${formatSignificant(upperPrice)} ${data.t1.symbol}/${data.t0.symbol}\n`;
-    message += `Current Price: ${formatSignificant(currentPrice)} ${data.t1.symbol}/${data.t0.symbol}\n`;
-    message += `Ratio: ${data.t0.symbol}/${data.t1.symbol} \`${Math.round(ratio0)}%/${Math.round(ratio1)}%\`\n`;
+    message += `${padString('Range:', 25)} ${formatSignificant(lowerPrice)} - ${formatSignificant(upperPrice)} ${data.t1.symbol}/${data.t0.symbol}\n`;
+    message += `${padString('Current Price:', 25)} ${formatSignificant(currentPrice)} ${data.t1.symbol}/${data.t0.symbol}\n`;
+    message += `${padString('Ratio:', 25)} ${data.t0.symbol}/${data.t1.symbol} \`${Math.round(ratio0)}%/${Math.round(ratio1)}%\`\n`;
 
     const inRange = BigInt(data.nativeTick) >= BigInt(data.pos.tickLower) && BigInt(data.nativeTick) < BigInt(data.pos.tickUpper);
-    message += `📍 In Range? ${inRange ? "✅ Yes" : "❌❌❌ NO ❌❌❌"}\n`;
+    message += `${padString('📍 In Range?', 25)} ${inRange ? "✅ Yes" : "❌❌❌ NO ❌❌❌"}\n`;
 
     const holdingsUSD = value0 + value1;
     message += `\nCurrent Holdings\n`;
@@ -653,12 +653,12 @@ function formatPositionData(data, walletAddress) {
     message += `${padString(holdingsStr0, 25)} ${formatUSD(value0)}\n`;
     const holdingsStr1 = `🏛 ${formatSignificant(data.amt1)} ${data.t1.symbol}`;
     message += `${padString(holdingsStr1, 25)} ${formatUSD(value1)}\n`;
-    message += `🏛 Holdings: ${formatUSD(holdingsUSD)}\n`;
+    message += `${padString('🏛 Holdings:', 25)} ${formatUSD(holdingsUSD)}\n`;
 
     if (data.positionHistoryAnalysisSucceeded) {
         const holdingsChange = holdingsUSD - data.histPrincipalUSD;
-        message += `📈 Holdings change: ${formatUSD(holdingsChange)}\n`;
-    }
+        message += `${padString('📈 Holdings change:', 25)} ${formatUSD(holdingsChange)}\n`;
+        }
 
     const feeUSD0 = data.fee0 * data.t0.priceUSD;
     const feeUSD1 = data.fee1 * data.t1.priceUSD;
@@ -669,7 +669,7 @@ function formatPositionData(data, walletAddress) {
     message += `${padString(feeStr0, 25)} ${formatUSD(feeUSD0)}\n`;
     const feeStr1 = `💰 ${formatSignificant(data.fee1)} ${data.t1.symbol}`;
     message += `${padString(feeStr1, 25)} ${formatUSD(feeUSD1)}\n`;
-    message += `💰 Total Fees: ${formatUSD(totalFeesUSD)}\n`;
+    message += `${padString('💰 Total Fees:', 25)} ${formatUSD(totalFeesUSD)}\n`;
 
     if (data.positionHistoryAnalysisSucceeded && data.histPrincipalUSD > 0) {
         const now = new Date();
@@ -682,14 +682,14 @@ function formatPositionData(data, walletAddress) {
         message += `${padString('💧 Fees per day:', 25)} ${formatUSD(rewardsPerYear / 365.25)}\n`;
         message += `${padString('💧 Fees per month:', 25)} ${formatUSD(rewardsPerYear / 12)}\n`;
         message += `${padString('💧 Fees per year:', 25)} ${formatUSD(rewardsPerYear)}\n`;
-        message += `💧 Fees APR: ${feesAPR.toFixed(2)}%\n`;
+        message += `${padString('💧 Fees APR:', 25)} ${feesAPR.toFixed(2)}%\n`;
     }
 
     const positionValue = holdingsUSD + totalFeesUSD;
-    message += `\n🏦 Position Value: ${formatUSD(positionValue)}\n`;
+    message += `${padString('\n🏦 Position Value:', 25)} ${formatUSD(positionValue)}\n`;
     if (data.positionHistoryAnalysisSucceeded) {
         const totalReturn = positionValue - data.histPrincipalUSD;
-        message += `📈 Position Total return + Fees: ${formatUSD(totalReturn)}\n`;
+        message += `${padString('📈 Position return + Fees:', 25)} ${formatUSD(totalReturn)}\n`;
     }
 
     return message;
@@ -967,7 +967,7 @@ async function processTelegramCommand(update) {
                     }
                     if(result.aaveData) {
                         chainMessage += `\n${createHeader(`Aave Lending (${result.chain.toUpperCase()})`)}\n`;
-                        chainMessage += `🔹 Total Collateral: ${result.aaveData.totalCollateral}  🔺 Total Debt: ${result.aaveData.totalDebt}\n`;
+                        chainMessage += `🔹 Total Collateral: ${result.aaveData.totalCollateral}\n🔺 Total Debt: ${result.aaveData.totalDebt}\n`;
                         chainMessage += `Health Factor: ${formatHealthFactor(result.aaveData.healthFactor)}\n`;
                         // --- CORRECTED LINE ---
                         chainMessage += `Borrowed Assets:\n${result.aaveData.borrowedAssets.replace(/•/g, '   🔺')}\n`;
