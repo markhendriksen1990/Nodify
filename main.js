@@ -21,6 +21,7 @@ const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const CHAT_ID = process.env.CHAT_ID;
 const RENDER_WEBHOOK_URL = process.env.RENDER_WEBHOOK_URL;
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
+const addressToMonitor = process.env.WALLET_ADDRESS;
 
 // --- Ethers.js Provider and Contract Addresses ---
 const chains = {
@@ -696,7 +697,6 @@ function formatPositionData(data, walletAddress) {
 }
 
 // --- Execution Block (Now for Telegram Bot) ---
-const addressToMonitor = "0x2FD24cC510b7a40b176B05A5Bb628d024e3B6886";
 const allChains = Object.keys(chains);
 
 async function generateSnapshotImage(data) {
